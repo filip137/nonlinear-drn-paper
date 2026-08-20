@@ -1,0 +1,67 @@
+\begin{landscape}
+{\scriptsize
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.05}
+\begin{longtable}{lccrrrrrr}
+\caption{Runtime decomposition for the CPU timing runs included in the solver comparison. Outer iterations denote the average number of equilibrium sweeps per sample. Inner iterations denote the average number of local nonlinear-solver iterations per call. Unavailable SPICE timings and speedups are marked with dashes.}\label{tab:timing_runtime_decomposition}\\
+\toprule
+Nonlinearity & H & Width & CD [s] & SPICE [s] & Speedup & Outer avg. & Inner avg./call & Total inner\\
+\midrule
+\endfirsthead
+\multicolumn{9}{l}{\tablename~\thetable\ (continued)}\\
+\toprule
+Nonlinearity & H & Width & CD [s] & SPICE [s] & Speedup & Outer avg. & Inner avg./call & Total inner\\
+\midrule
+\endhead
+\midrule
+\multicolumn{9}{r}{Continued on next page}\\
+\endfoot
+\bottomrule
+\endlastfoot
+Single Shockley & 1 & 64 & 7.246 & 59.305 & 8.2 & 11.972 & 1.181 & 10,176\\
+Single Shockley & 1 & 128 & 7.679 & 30.891 & 4.0 & 9.000 & 2.000 & 12,960\\
+Single Shockley & 1 & 256 & 5.889 & 69.386 & 11.8 & 5.878 & 2.000 & 8,464\\
+Single Shockley & 1 & 512 & 6.013 & 198.342 & 33.0 & 5.469 & 1.990 & 7,836\\
+Single Shockley & 1 & 1024 & 6.005 & 793.847 & 132.2 & 5.106 & 1.999 & 7,349\\
+Single Shockley & 2 & 64 & 17.869 & 76.661 & 4.3 & 15.172 & 1.404 & 30,666\\
+Single Shockley & 2 & 128 & 17.492 & 477.836 & 27.3 & 14.878 & 1.084 & 23,213\\
+Single Shockley & 2 & 256 & 24.606 & 4293.154 & 174.5 & 21.456 & 1.000 & 30,896\\
+Single Shockley & 2 & 512 & 39.363 & 49270.400 & 1251.7 & 31.775 & 1.000 & 45,756\\
+Single Shockley & 2 & 1024 & 48.479 & -- & -- & 27.586 & 1.000 & 39,724\\
+Single Shockley & 3 & 64 & 162.036 & 186.352 & 1.2 & 80.794 & 1.532 & 267,400\\
+Single Shockley & 3 & 128 & 48.861 & 1737.107 & 35.6 & 17.853 & 2.408 & 92,876\\
+Single Shockley & 3 & 256 & 132.086 & 12971.061 & 98.2 & 67.783 & 1.365 & 199,839\\
+Single Shockley & 3 & 512 & 46.419 & -- & -- & 17.000 & 1.640 & 60,221\\
+\addlinespace
+Double Shockley & 1 & 64 & 5.923 & 22.065 & 3.7 & 9.000 & 1.895 & 6,141\\
+Double Shockley & 1 & 128 & 4.767 & 73.608 & 15.4 & 8.972 & 1.000 & 3,230\\
+Double Shockley & 1 & 256 & 5.946 & 100.499 & 16.9 & 9.000 & 1.966 & 6,371\\
+Double Shockley & 1 & 512 & 7.815 & 309.581 & 39.6 & 9.000 & 1.994 & 6,462\\
+Double Shockley & 1 & 1024 & 8.324 & 1107.349 & 133.0 & 9.000 & 2.000 & 6,480\\
+Double Shockley & 2 & 64 & 14.678 & 68.514 & 4.7 & 16.750 & 1.000 & 12,060\\
+Double Shockley & 2 & 128 & 14.702 & 549.956 & 37.4 & 15.847 & 1.213 & 13,837\\
+Double Shockley & 2 & 256 & 16.778 & 4312.234 & 257.0 & 18.033 & 1.000 & 12,984\\
+Double Shockley & 2 & 512 & 29.478 & 51768.450 & 1756.2 & 26.522 & 1.000 & 19,096\\
+Double Shockley & 2 & 1024 & 55.053 & -- & -- & 31.731 & 1.000 & 22,846\\
+Double Shockley & 3 & 64 & 27.569 & 138.930 & 5.0 & 9.578 & 1.879 & 30,427\\
+Double Shockley & 3 & 128 & 21.922 & 1183.510 & 54.0 & 16.158 & 1.389 & 24,245\\
+Double Shockley & 3 & 256 & 47.417 & 14361.823 & 302.9 & 16.644 & 7.844 & 141,011\\
+Double Shockley & 3 & 512 & 78.675 & -- & -- & 51.936 & 1.000 & 56,091\\
+\addlinespace
+PWL i(v) & 1 & 64 & 11.807 & 22.023 & 1.9 & 13.778 & 20.352 & 100,948\\
+PWL i(v) & 1 & 128 & 2.950 & 39.071 & 13.2 & 14.142 & 1.024 & 5,211\\
+PWL i(v) & 1 & 256 & 8.974 & 94.790 & 10.6 & 8.050 & 20.875 & 60,497\\
+PWL i(v) & 1 & 512 & 9.070 & 311.140 & 34.3 & 7.233 & 21.082 & 54,898\\
+PWL i(v) & 1 & 1024 & 10.487 & 1094.952 & 104.4 & 5.761 & 24.476 & 50,764\\
+PWL i(v) & 2 & 64 & 11.105 & 61.481 & 5.5 & 33.400 & 1.000 & 24,048\\
+PWL i(v) & 2 & 128 & 12.756 & 543.731 & 42.6 & 21.236 & 3.956 & 60,485\\
+PWL i(v) & 2 & 256 & 15.340 & 4301.242 & 280.4 & 39.936 & 1.000 & 28,754\\
+PWL i(v) & 2 & 512 & 29.918 & 52009.107 & 1738.4 & 61.994 & 1.000 & 44,636\\
+PWL i(v) & 2 & 1024 & 54.844 & -- & -- & 68.481 & 1.000 & 49,306\\
+PWL i(v) & 3 & 64 & 15.679 & 165.079 & 10.5 & 7.422 & 15.818 & 126,800\\
+PWL i(v) & 3 & 128 & 30.622 & 1131.481 & 37.0 & 26.231 & 6.905 & 195,624\\
+PWL i(v) & 3 & 256 & 12.472 & 13723.796 & 1100.4 & 13.167 & 3.643 & 51,805\\
+PWL i(v) & 3 & 512 & 67.944 & -- & -- & 95.214 & 1.000 & 102,831\\
+\end{longtable}
+}
+\end{landscape}

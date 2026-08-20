@@ -1,0 +1,302 @@
+{
+  "hidden": {
+    "hidden_1": [
+      {
+        "iterations": 4,
+        "p50": 0.0016100404195770737,
+        "p90": 0.001659773521918346,
+        "p95": 0.0016781499099793294,
+        "p99": 0.0017029748023665032,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter4/20260513-191124_single_diode_exponential"
+      },
+      {
+        "iterations": 6,
+        "p50": 6.49060900005564e-05,
+        "p90": 6.820338652776265e-05,
+        "p95": 6.942686291021547e-05,
+        "p99": 7.12100557353068e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter6/20260513-191129_single_diode_exponential"
+      },
+      {
+        "iterations": 8,
+        "p50": 1.5243660654900843e-05,
+        "p90": 1.6357837845656416e-05,
+        "p95": 1.6760458548006e-05,
+        "p99": 1.7112055331989585e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter8/20260513-191135_single_diode_exponential"
+      },
+      {
+        "iterations": 10,
+        "p50": 1.502751687063426e-05,
+        "p90": 1.613303593764434e-05,
+        "p95": 1.6528320770999835e-05,
+        "p99": 1.7059151839807143e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter10/20260513-191140_single_diode_exponential"
+      },
+      {
+        "iterations": 12,
+        "p50": 1.502707431667337e-05,
+        "p90": 1.6131298621785318e-05,
+        "p95": 1.651176475102063e-05,
+        "p99": 1.706118616359742e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter12/20260513-191145_single_diode_exponential"
+      },
+      {
+        "iterations": 14,
+        "p50": 1.5026723097212354e-05,
+        "p90": 1.6131266596067096e-05,
+        "p95": 1.6510730134876725e-05,
+        "p99": 1.706109491694805e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter14/20260513-191151_single_diode_exponential"
+      },
+      {
+        "iterations": 16,
+        "p50": 1.5026712509702167e-05,
+        "p90": 1.613126734025499e-05,
+        "p95": 1.6510732663368122e-05,
+        "p99": 1.7060962524153574e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter16/20260513-191156_single_diode_exponential"
+      },
+      {
+        "iterations": 32,
+        "p50": 1.5026712509702167e-05,
+        "p90": 1.613126734025499e-05,
+        "p95": 1.6510732663368122e-05,
+        "p99": 1.70609613638615e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter32/20260513-191202_single_diode_exponential"
+      },
+      {
+        "iterations": 64,
+        "p50": 1.5026712509702167e-05,
+        "p90": 1.613126734025499e-05,
+        "p95": 1.6510732663368122e-05,
+        "p99": 1.70609613638615e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter64/20260513-191208_single_diode_exponential"
+      },
+      {
+        "iterations": 128,
+        "p50": 1.5026712509702167e-05,
+        "p90": 1.613126734025499e-05,
+        "p95": 1.6510732663368122e-05,
+        "p99": 1.70609613638615e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter128/20260513-191215_single_diode_exponential"
+      },
+      {
+        "iterations": 256,
+        "p50": 1.5026712509702167e-05,
+        "p90": 1.613126734025499e-05,
+        "p95": 1.6510732663368122e-05,
+        "p99": 1.70609613638615e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter256/20260513-191224_single_diode_exponential"
+      },
+      {
+        "iterations": 512,
+        "p50": 1.5026712509702167e-05,
+        "p90": 1.613126734025499e-05,
+        "p95": 1.6510732663368122e-05,
+        "p99": 1.70609613638615e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_1/exp_clip_165/iter512/20260513-191238_single_diode_exponential"
+      }
+    ],
+    "hidden_2": [
+      {
+        "iterations": 4,
+        "p50": 0.03130185019857083,
+        "p90": 0.034592046010958034,
+        "p95": 0.035600051781210076,
+        "p99": 0.03847558132233083,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter4/20260513-191300_single_diode_exponential"
+      },
+      {
+        "iterations": 6,
+        "p50": 0.0050971824634066685,
+        "p90": 0.0058274174139706335,
+        "p95": 0.005990774871883504,
+        "p99": 0.006247627420230432,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter6/20260513-191305_single_diode_exponential"
+      },
+      {
+        "iterations": 8,
+        "p50": 0.0008209512184901874,
+        "p90": 0.000918478852189055,
+        "p95": 0.0009574675411633195,
+        "p99": 0.0010114386544146225,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter8/20260513-191311_single_diode_exponential"
+      },
+      {
+        "iterations": 10,
+        "p50": 0.00013675734376549268,
+        "p90": 0.00015117507452070298,
+        "p95": 0.0001581262189729882,
+        "p99": 0.0001633714978185958,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter10/20260513-191316_single_diode_exponential"
+      },
+      {
+        "iterations": 12,
+        "p50": 2.3920377498243746e-05,
+        "p90": 2.7085243469526138e-05,
+        "p95": 2.8350803167521732e-05,
+        "p99": 2.9748506491384502e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter12/20260513-191321_single_diode_exponential"
+      },
+      {
+        "iterations": 14,
+        "p50": 1.0325088548002403e-05,
+        "p90": 1.1622133201952318e-05,
+        "p95": 1.1982642283282586e-05,
+        "p99": 1.276106489024373e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter14/20260513-191326_single_diode_exponential"
+      },
+      {
+        "iterations": 16,
+        "p50": 9.321885735527611e-06,
+        "p90": 1.0365405612422034e-05,
+        "p95": 1.071349445765939e-05,
+        "p99": 1.1547556721407245e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter16/20260513-191331_single_diode_exponential"
+      },
+      {
+        "iterations": 32,
+        "p50": 9.23928103491942e-06,
+        "p90": 1.0277148104313878e-05,
+        "p95": 1.0647644305924306e-05,
+        "p99": 1.1470444864857836e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter32/20260513-191336_single_diode_exponential"
+      },
+      {
+        "iterations": 64,
+        "p50": 9.23928103491942e-06,
+        "p90": 1.0277148104313878e-05,
+        "p95": 1.0647644305924306e-05,
+        "p99": 1.1470444864857836e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter64/20260513-191342_single_diode_exponential"
+      },
+      {
+        "iterations": 128,
+        "p50": 9.23928103491942e-06,
+        "p90": 1.0277148104313878e-05,
+        "p95": 1.0647644305924306e-05,
+        "p99": 1.1470444864857836e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter128/20260513-191347_single_diode_exponential"
+      },
+      {
+        "iterations": 256,
+        "p50": 9.23928103491942e-06,
+        "p90": 1.0277148104313878e-05,
+        "p95": 1.0647644305924306e-05,
+        "p99": 1.1470444864857836e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter256/20260513-191353_single_diode_exponential"
+      },
+      {
+        "iterations": 512,
+        "p50": 9.23928103491942e-06,
+        "p90": 1.0277148104313878e-05,
+        "p95": 1.0647644305924306e-05,
+        "p99": 1.1470444864857836e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_2/exp_clip_165/iter512/20260513-191401_single_diode_exponential"
+      }
+    ],
+    "hidden_3": [
+      {
+        "iterations": 4,
+        "p50": 0.0822014449107481,
+        "p90": 0.08460738545970559,
+        "p95": 0.08520075069851203,
+        "p99": 0.0864331526779284,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter4/20260513-191410_single_diode_exponential"
+      },
+      {
+        "iterations": 6,
+        "p50": 0.01788406712887687,
+        "p90": 0.018514874077324293,
+        "p95": 0.018684191197438346,
+        "p99": 0.019092888086884145,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter6/20260513-191415_single_diode_exponential"
+      },
+      {
+        "iterations": 8,
+        "p50": 0.0034066000397932,
+        "p90": 0.0036122218338066107,
+        "p95": 0.003659482733703151,
+        "p99": 0.003745856277113829,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter8/20260513-191421_single_diode_exponential"
+      },
+      {
+        "iterations": 10,
+        "p50": 0.0005960737345393895,
+        "p90": 0.0006464930110265814,
+        "p95": 0.0006579377219015803,
+        "p99": 0.0006783319767382565,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter10/20260513-191426_single_diode_exponential"
+      },
+      {
+        "iterations": 12,
+        "p50": 0.00010185648733081929,
+        "p90": 0.00011117706595535676,
+        "p95": 0.00011377793119755024,
+        "p99": 0.00011756747845296669,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter12/20260513-191432_single_diode_exponential"
+      },
+      {
+        "iterations": 14,
+        "p50": 2.612480950171083e-05,
+        "p90": 2.7546570561509968e-05,
+        "p95": 2.7884273729077503e-05,
+        "p99": 2.9002512363866233e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter14/20260513-191438_single_diode_exponential"
+      },
+      {
+        "iterations": 16,
+        "p50": 1.591620598387768e-05,
+        "p90": 1.6585250743233625e-05,
+        "p95": 1.678825907359974e-05,
+        "p99": 1.7078133641268734e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter16/20260513-191444_single_diode_exponential"
+      },
+      {
+        "iterations": 32,
+        "p50": 1.4732009161244573e-05,
+        "p90": 1.532976492096327e-05,
+        "p95": 1.5533129950192542e-05,
+        "p99": 1.5814220204041773e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter32/20260513-191450_single_diode_exponential"
+      },
+      {
+        "iterations": 64,
+        "p50": 1.4732009161244573e-05,
+        "p90": 1.532976492096327e-05,
+        "p95": 1.5533129950192542e-05,
+        "p99": 1.5814220204041773e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter64/20260513-191457_single_diode_exponential"
+      },
+      {
+        "iterations": 128,
+        "p50": 1.4732009161244573e-05,
+        "p90": 1.532976492096327e-05,
+        "p95": 1.5533129950192542e-05,
+        "p99": 1.5814220204041773e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter128/20260513-191505_single_diode_exponential"
+      },
+      {
+        "iterations": 256,
+        "p50": 1.4732009161244573e-05,
+        "p90": 1.532976492096327e-05,
+        "p95": 1.5533129950192542e-05,
+        "p99": 1.5814220204041773e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter256/20260513-191516_single_diode_exponential"
+      },
+      {
+        "iterations": 512,
+        "p50": 1.4732009161244573e-05,
+        "p90": 1.532976492096327e-05,
+        "p95": 1.5533129950192542e-05,
+        "p99": 1.5814220204041773e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513/runs/single_diode_exponential/hidden_3/exp_clip_165/iter512/20260513-191534_single_diode_exponential"
+      }
+    ]
+  },
+  "non_linearity": "single_diode_exponential",
+  "updated_at": "2026-05-13T20:16:04.436084+00:00",
+  "source_artifact_root": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/exp_clip_165_batch256_20260513",
+  "promotion_note": "Promoted corrected exp_clip=165 batch_size=256 error-vs-iteration rerun on 2026-05-13. Double hidden_3 uses corrected validation config; stale first-pass hidden_3 rows are intentionally excluded."
+}

@@ -1,0 +1,118 @@
+{
+  "created_at": "2026-05-13T16:55:10.725473+00:00",
+  "non_linearity": "experimental",
+  "hidden": {
+    "hidden_1": [
+      {
+        "rel_tol": "1e-7",
+        "rel_tol_value": 1e-07,
+        "p90": 9.957994833953055e-06,
+        "run_dir": "20260513-185148_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_1/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-7/20260513-185148_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-6",
+        "rel_tol_value": 1e-06,
+        "p90": 1.0277485991567041e-05,
+        "run_dir": "20260513-185158_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_1/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-6/20260513-185158_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-5",
+        "rel_tol_value": 1e-05,
+        "p90": 1.66878106160385e-05,
+        "run_dir": "20260513-185207_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_1/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-5/20260513-185207_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-4",
+        "rel_tol_value": 0.0001,
+        "p90": 0.00012602804449190458,
+        "run_dir": "20260513-185216_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_1/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-4/20260513-185216_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-3",
+        "rel_tol_value": 0.001,
+        "p90": 0.0011627075314741369,
+        "run_dir": "20260513-185225_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_1/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-3/20260513-185225_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      }
+    ],
+    "hidden_2": [
+      {
+        "rel_tol": "1e-7",
+        "rel_tol_value": 1e-07,
+        "p90": 1.2395397428716551e-05,
+        "run_dir": "20260513-185233_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_2/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-7/20260513-185233_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-6",
+        "rel_tol_value": 1e-06,
+        "p90": 1.2367317572947943e-05,
+        "run_dir": "20260513-185259_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_2/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-6/20260513-185259_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-5",
+        "rel_tol_value": 1e-05,
+        "p90": 1.3533619079228063e-05,
+        "run_dir": "20260513-185324_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_2/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-5/20260513-185324_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-4",
+        "rel_tol_value": 0.0001,
+        "p90": 5.6030922825346735e-05,
+        "run_dir": "20260513-185346_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_2/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-4/20260513-185346_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-3",
+        "rel_tol_value": 0.001,
+        "p90": 0.0005848799177163942,
+        "run_dir": "20260513-185405_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_2/vol_tol_sweep_omega1.0_batch1_20260513/rel_tol_1e-3/20260513-185405_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      }
+    ],
+    "hidden_3_amp_4": [
+      {
+        "rel_tol": "1e-7",
+        "rel_tol_value": 1e-07,
+        "p90": 1.1682315173342722e-05,
+        "run_dir": "20260302-155525_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_3/amp_4/vol_tol_sweep/rel_tol_1e-7/20260302-155525_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-6",
+        "rel_tol_value": 1e-06,
+        "p90": 1.1742089917581712e-05,
+        "run_dir": "20260302-155702_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_3/amp_4/vol_tol_sweep/rel_tol_1e-6/20260302-155702_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-5",
+        "rel_tol_value": 1e-05,
+        "p90": 1.4586818295788393e-05,
+        "run_dir": "20260303-094453_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_3/amp_4/vol_tol_sweep/rel_tol_1e-5/20260303-094453_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-4",
+        "rel_tol_value": 0.0001,
+        "p90": 7.851401206693129e-05,
+        "run_dir": "20260302-160001_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_3/amp_4/vol_tol_sweep/rel_tol_1e-4/20260302-160001_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-3",
+        "rel_tol_value": 0.001,
+        "p90": 0.0007634119592045917,
+        "run_dir": "20260302-160118_experimental",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/experimental/hidden_3/amp_4/vol_tol_sweep/rel_tol_1e-3/20260302-160118_experimental/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      }
+    ]
+  },
+  "batch1_rerun_note": "experimental hidden_1 and hidden_2 rel_tol sweeps were rerun with batch_size=1 on 2026-05-13. hidden_3_amp_4 was already per-sample and is retained from the existing summary."
+}

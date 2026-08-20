@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this artifact, please cite the paper and this software repository."
+title: "Nonlinear DRN paper reproducibility artifact"
+type: software
+version: 0.1.0
+date-released: 2026-08-20
+authors:
+  - family-names: Osana
+    given-names: Filip
+  - family-names: Grollier
+    given-names: Julie
+  - family-names: Querlioz
+    given-names: Damien
+abstract: >-
+  Minimal code, configurations, checkpoints, reference states, and curated
+  measurements for the paper Fast simulation of nonlinear deep resistive
+  networks for energy-based computation.
+license: MIT
+preferred-citation:
+  type: article
+  title: "Fast simulation of nonlinear deep resistive networks for energy-based computation"
+  year: 2026
+  authors:
+    - family-names: Osana
+      given-names: Filip
+    - family-names: Grollier
+      given-names: Julie
+    - family-names: Querlioz
+      given-names: Damien

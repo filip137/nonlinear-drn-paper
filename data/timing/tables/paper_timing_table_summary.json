@@ -1,0 +1,8 @@
+{
+  "total_rows": 42,
+  "rows_with_spice_timing": 36,
+  "rows_with_error": 36,
+  "min_speedup": 1.1500693061826202,
+  "max_speedup": 1756.1933805858077,
+  "max_p90_relative_error": 9.895623232375704e-05
+}

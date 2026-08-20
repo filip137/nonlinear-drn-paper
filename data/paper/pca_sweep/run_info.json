@@ -1,0 +1,9 @@
+{
+  "source_description": "MNIST DRN-XS PCA grid evaluated after four coordinate-descent iterations",
+  "timestamp": "20260518-105535",
+  "model_key": "drn-xs",
+  "num_iterations": 4,
+  "pca_steps": 30,
+  "pca_n_sigma": 3.0,
+  "pca_batch_size": null
+}

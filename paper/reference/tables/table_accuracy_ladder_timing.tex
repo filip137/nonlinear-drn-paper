@@ -1,0 +1,33 @@
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{llrrrrr}
+\toprule
+Nonlinearity & Point & Acc. [\%] & CD [s] & SPICE [s] & Speed-up & P90 rel. err.\\
+\midrule
+Single Shockley & Initial & 8.6 & 22.9 & 453.2 & 19.8$\times$ & $1.58\times 10^{-5}$\\
+Single Shockley & 50 & 49.4 & 18.9 & 456.9 & 24.1$\times$ & $1.18\times 10^{-5}$\\
+Single Shockley & 70 & 70.6 & 18.9 & 478.2 & 25.3$\times$ & $1.20\times 10^{-5}$\\
+Single Shockley & 80 & 78.6 & 18.5 & 493.3 & 26.6$\times$ & $1.25\times 10^{-5}$\\
+Single Shockley & 90 & 89.7 & 17.8 & 494.8 & 27.8$\times$ & $1.34\times 10^{-5}$\\
+Single Shockley & Best & 93.9 & 16.4 & 463.6 & 28.2$\times$ & $1.08\times 10^{-5}$\\
+\addlinespace
+Double Shockley & Initial & 8.3 & 22.4 & 435.8 & 19.5$\times$ & $1.62\times 10^{-5}$\\
+Double Shockley & 50 & 52.8 & 14.3 & 467.3 & 32.8$\times$ & $1.23\times 10^{-5}$\\
+Double Shockley & 70 & 68.9 & 13.7 & 496.1 & 36.3$\times$ & $1.28\times 10^{-5}$\\
+Double Shockley & 80 & 78.6 & 13.7 & 513.1 & 37.4$\times$ & $1.28\times 10^{-5}$\\
+Double Shockley & 90 & 89.7 & 13.3 & 585.4 & 43.9$\times$ & $1.27\times 10^{-5}$\\
+Double Shockley & Best & 94.4 & 13.4 & 588.5 & 44.0$\times$ & $1.25\times 10^{-5}$\\
+\addlinespace
+PWL \(i(v)\) & Initial & 8.3 & 26.9 & 425.0 & 15.8$\times$ & $7.26\times 10^{-5}$\\
+PWL \(i(v)\) & 50 & 53.1 & 19.0 & 458.0 & 24.1$\times$ & $5.24\times 10^{-5}$\\
+PWL \(i(v)\) & 70 & 68.9 & 18.8 & 454.3 & 24.2$\times$ & $4.77\times 10^{-5}$\\
+PWL \(i(v)\) & 80 & 78.6 & 22.4 & 473.7 & 21.1$\times$ & $4.12\times 10^{-5}$\\
+PWL \(i(v)\) & 90 & 89.7 & 14.0 & 530.8 & 37.8$\times$ & $1.68\times 10^{-5}$\\
+PWL \(i(v)\) & Best & 94.4 & 12.4 & 546.8 & 44.2$\times$ & $1.36\times 10^{-5}$\\
+\bottomrule
+\end{tabular}
+\caption{Accuracy-ladder timing comparison for fixed two-hidden-layer, width-128 Digits networks. SPICE reports simulation time only, excluding netlist generation.}
+\label{tab:accuracy_ladder_timing}
+\end{table}

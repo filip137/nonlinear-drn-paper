@@ -1,0 +1,43 @@
+case,source,batch_size,exp_clip,max_newton_iters,overrelaxation_factor,accuracy_pct,correct,total,notes
+double_diode_exponential/hidden_1/hidden_64,corrected CD-only against existing SPICE,1,165,8,1.2,95.00,342,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_1/hidden_128,corrected CD-only against existing SPICE,1,165,8,1.2,91.67,330,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_1/hidden_256,corrected CD-only against existing SPICE,1,165,8,1.2,95.56,344,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_1/hidden_512,corrected CD-only against existing SPICE,1,165,8,1.2,96.11,346,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_1/hidden_1024,corrected CD-only against existing SPICE,1,165,8,1.2,95.00,342,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_2/hidden_64,corrected CD-only against existing SPICE,1,165,8,1.4,93.89,338,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_2/hidden_128,corrected CD-only against existing SPICE,1,165,8,1.4,94.44,340,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_2/hidden_256,corrected CD-only against existing SPICE,1,165,8,1.4,93.61,337,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_2/hidden_512,corrected CD-only against existing SPICE,1,165,8,1.4,93.33,336,360,batch=1 exp_clip=165 max_newton=8
+double_diode_exponential/hidden_2/hidden_1024,corrected CD-only no SPICE reference,1,165,8,1.4,86.11,310,360,CD rerun only; no fixed SPICE NPZ/error reference available
+double_diode_exponential/hidden_3/hidden_64,current replacement corrected CD,1,165,8,1.2,91.94,331,360,CD rerun uses batch=1 exp_clip=165 max_newton=8 against existing SPICE
+double_diode_exponential/hidden_3/hidden_128,April29 timing CD,1,165,8,1.4,96.11,346,360,original April29 timing CD row
+double_diode_exponential/hidden_3/hidden_256,current replacement corrected CD,1,165,8,1.4,90.28,325,360,single-process SPICE timing still failed; accuracy is from corrected CD validation
+double_diode_exponential/hidden_3/hidden_512,corrected CD-only no SPICE reference,1,165,8,1.4,91.94,331,360,CD rerun only; no fixed SPICE NPZ/error reference available
+experimental/hidden_1/hidden_64,April29 timing CD,1,100,100,1.0,95.00,342,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_1/hidden_128,April29 timing CD,1,100,8,1.0,91.67,330,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_1/hidden_256,April29 timing CD,1,100,8,1.0,95.56,344,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_1/hidden_512,April29 timing CD,1,100,8,1.0,96.11,346,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_1/hidden_1024,April29 timing CD,1,100,8,1.0,95.00,342,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_2/hidden_64,April29 timing CD,1,200,8,1,93.89,338,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_2/hidden_128,April29 timing CD,1,200,8,1,94.44,340,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_2/hidden_256,April29 timing CD,1,200,8,1,93.61,337,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_2/hidden_512,April29 timing CD,1,200,8,1,93.33,336,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_2/hidden_1024,April29 timing CD,1,200,8,1,86.11,310,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_3/hidden_64,April29 timing CD,1,100000.0,32,1,82.50,297,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_3/hidden_128,April29 timing CD,1,165,32,1,96.11,346,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_3/hidden_256,April29 timing CD,1,100000.0,32,1,82.78,298,360,original April29 timing CD row; experimental not rerun per instruction
+experimental/hidden_3/hidden_512,April29 timing CD,1,100000.0,32,1,91.94,331,360,original April29 timing CD row; experimental not rerun per instruction
+single_diode_exponential/hidden_1/hidden_64,current replacement,1,165,8,1,91.39,329,360,accepted high-accuracy replacement
+single_diode_exponential/hidden_1/hidden_128,April29 timing CD,1,165,8,1.2,95.00,342,360,original April29 timing CD row
+single_diode_exponential/hidden_1/hidden_256,corrected CD-only against existing SPICE,1,165,8,1,95.56,344,360,batch=1 exp_clip=165 max_newton=8
+single_diode_exponential/hidden_1/hidden_512,corrected CD-only against existing SPICE,1,165,8,1,96.39,347,360,batch=1 exp_clip=165 max_newton=8
+single_diode_exponential/hidden_1/hidden_1024,corrected CD-only against existing SPICE,1,165,8,1,97.50,351,360,batch=1 exp_clip=165 max_newton=8
+single_diode_exponential/hidden_2/hidden_64,April29 timing CD,1,165,8,1.4,85.56,308,360,original April29 timing CD row
+single_diode_exponential/hidden_2/hidden_128,April29 timing CD,1,165,8,1.4,93.89,338,360,original April29 timing CD row
+single_diode_exponential/hidden_2/hidden_256,corrected CD-only against existing SPICE,1,165,8,1.4,89.44,322,360,batch=1 exp_clip=165 max_newton=8
+single_diode_exponential/hidden_2/hidden_512,April29 timing CD,1,165,8,1.4,83.61,301,360,original April29 timing CD row
+single_diode_exponential/hidden_2/hidden_1024,April29 timing CD,1,165,8,1.4,93.06,335,360,original April29 timing CD row
+single_diode_exponential/hidden_3/hidden_64,current replacement corrected CD,1,165,8,1.4,89.44,322,360,CD rerun uses batch=1 exp_clip=165 max_newton=8 against existing SPICE
+single_diode_exponential/hidden_3/hidden_128,accepted EP epoch3 corrected CD,1,165,8,1.4,92.22,332,360,accepted 92.22% 3x128 case
+single_diode_exponential/hidden_3/hidden_256,corrected CD-only against existing SPICE,1,165,8,1.4,84.44,304,360,batch=1 exp_clip=165 max_newton=8
+single_diode_exponential/hidden_3/hidden_512,corrected CD-only no SPICE reference,1,165,8,1.4,83.06,299,360,CD rerun only; no fixed SPICE NPZ/error reference available

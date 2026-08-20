@@ -1,0 +1,33 @@
+{
+  "description": "One-to-one map of manuscript assets to portable repository inputs.",
+  "figures": [
+    {"path": "figures/bidirectionalampschematic_cropped.pdf", "method": "source-artwork:copy", "inputs": ["paper/reference/figures/bidirectionalampschematic_cropped.pdf"]},
+    {"path": "figures/double_shockley_iv.pdf", "method": "source-artwork:copy", "inputs": ["paper/reference/figures/double_shockley_iv.pdf"]},
+    {"path": "figures/mosfet_id_vds.pdf", "method": "source-artwork:copy", "inputs": ["paper/reference/figures/mosfet_id_vds.pdf"]},
+    {"path": "figures/non_linear_circuit_simple_cropped-1.pdf", "method": "source-artwork:copy", "inputs": ["paper/reference/figures/non_linear_circuit_simple_cropped-1.pdf"]},
+    {"path": "figures/shockley_iv.pdf", "method": "source-artwork:copy", "inputs": ["paper/reference/figures/shockley_iv.pdf"]},
+    {"path": "figures/experiments/circuits2_cropped.pdf", "method": "source-artwork:copy", "inputs": ["paper/reference/figures/experiments/circuits2_cropped.pdf"]},
+    {"path": "figures/experiments/digits_error_vs_iter/single_diode_error_vs_iter_summary_20260302_p90.png", "method": "matplotlib:error-vs-iterations", "inputs": ["data/error_vs_iter/summaries/single_diode_exponential/error_vs_iter_summary_20260302.json"]},
+    {"path": "figures/experiments/digits_error_vs_iter/double_diode_error_vs_iter_summary_20260302_p90.png", "method": "matplotlib:error-vs-iterations", "inputs": ["data/error_vs_iter/summaries/double_diode_exponential/error_vs_iter_summary_20260302.json"]},
+    {"path": "figures/experiments/digits_error_vs_iter/experimental__error_vs_iter_summary_20260302_p90.png", "method": "matplotlib:error-vs-iterations", "inputs": ["data/error_vs_iter/summaries/experimental/error_vs_iter_summary_20260302.json"]},
+    {"path": "figures/experiments/digits_error_vs_vol_tol/single_p90_vs_rel_tol_all_hidden.png", "method": "matplotlib:voltage-tolerance", "inputs": ["data/paper/vol_tol/single_diode_exponential.json"]},
+    {"path": "figures/experiments/digits_error_vs_vol_tol/double_diode_p90_vs_rel_tol_all_hidden.png", "method": "matplotlib:voltage-tolerance", "inputs": ["data/paper/vol_tol/double_diode_exponential.json"]},
+    {"path": "figures/experiments/digits_error_vs_vol_tol/experimental_p90_vs_rel_tol_all_hidden.png", "method": "matplotlib:voltage-tolerance", "inputs": ["data/paper/vol_tol/experimental.json"]},
+    {"path": "figures/experiments/digits_timing_cpu/single_diode_exponential_cpu_spice_vs_coordinate_descent_loglog.png", "method": "matplotlib:timing", "inputs": ["data/timing/figure_inputs/single_diode_exponential/combined_latest_by_hidden.csv"]},
+    {"path": "figures/experiments/digits_timing_cpu/double_diode_exponential_cpu_spice_vs_coordinate_descent_loglog.png", "method": "matplotlib:timing", "inputs": ["data/timing/figure_inputs/double_diode_exponential/combined_latest_by_hidden.csv"]},
+    {"path": "figures/experiments/digits_timing_cpu/experimental_cpu_spice_vs_coordinate_descent_loglog.png", "method": "matplotlib:timing", "inputs": ["data/timing/figure_inputs/experimental/combined_latest_by_hidden.csv"]},
+    {"path": "figures/digits_overrelaxation/p90_vs_iterations_overrelax.png", "method": "matplotlib:overrelaxation", "inputs": ["data/paper/overrelaxation/error_vs_iter_p90_summary.json"]},
+    {"path": "figures/supplementary/conditioning_vs_runtime_experimental/raw_inv_neg_log_rho_side_by_side_hidden1.png", "method": "matplotlib:conditioning", "inputs": ["data/paper/conditioning/conditioning_vs_runtime_hidden1.csv"]},
+    {"path": "figures/supplementary/conditioning_vs_runtime_experimental/raw_inv_neg_log_rho_side_by_side_hidden2.png", "method": "matplotlib:conditioning", "inputs": ["data/paper/conditioning/conditioning_vs_runtime_hidden2.csv"]},
+    {"path": "figures/supplementary/conditioning_vs_runtime_experimental/raw_inv_neg_log_rho_side_by_side_hidden3.png", "method": "matplotlib:conditioning", "inputs": ["data/paper/conditioning/conditioning_vs_runtime_hidden3.csv"]},
+    {"path": "figures/supplementary/mnist/mean_test_accuracy_selected_runs_with_perfect_diode.png", "method": "matplotlib:mnist-accuracy", "inputs": ["data/paper/mnist/mean_test_accuracy_selected_runs_with_perfect_diode.json"]},
+    {"path": "figures/supplementary/mnist/pca_sweep_rel_l1_blue_dots_x1e3_log_scale.png", "method": "matplotlib:pca-relative-error", "inputs": ["data/paper/pca_sweep/pca_sweep_iter4.npz", "data/paper/pca_sweep/pca_sweep_iter4_flat_spice_layers.npz", "data/paper/pca_sweep/run_info.json"]},
+    {"path": "figures/supplementary/supplementary_timing/double_diode_hidden3_width128_component_timing_comparison_bar.pdf", "method": "matplotlib:component-timing", "inputs": ["data/paper/component_timing/component_timing_comparison.csv"]}
+  ],
+  "tables": [
+    {"path": "tables/table1_accuracy_longtable.tex", "method": "curated-table:copy", "inputs": ["data/timing/tables/table1_accuracy_longtable.tex"]},
+    {"path": "tables/table2_runtime_decomposition_longtable.tex", "method": "curated-table:copy", "inputs": ["data/timing/tables/table2_runtime_decomposition_longtable.tex"]},
+    {"path": "tables/table_timing_run_accuracies_input_gain_longtable.tex", "method": "curated-table:copy", "inputs": ["data/timing/tables/table_timing_run_accuracies_input_gain_longtable.tex"]},
+    {"path": "tables/table_accuracy_ladder_timing.tex", "method": "table:accuracy-ladder", "inputs": ["data/paper/accuracy_ladder/accuracy_ladder_timing_minimal_table.csv"]}
+  ]
+}

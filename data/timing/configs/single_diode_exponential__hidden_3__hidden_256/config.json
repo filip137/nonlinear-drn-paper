@@ -1,0 +1,66 @@
+{
+  "adaptive_equilibrium": true,
+  "batch_size": 1,
+  "current_amp": 1.0,
+  "damping": 0.5,
+  "dims": [
+    128,
+    256,
+    256,
+    256,
+    20
+  ],
+  "double_diode_runtime": "float64_fixed",
+  "double_diode_updater": "float32_overrelaxed",
+  "dynamic_polish": false,
+  "exp_clip": 165,
+  "experimental_newton_max_steps": 8,
+  "experimental_newton_tol": 1e-05,
+  "exponential_diode_param": {
+    "I_s": 1e-06,
+    "V_off": 0.8,
+    "V_t": 0.05
+  },
+  "hard_sigmoid_param": {
+    "g_off": 0.1,
+    "g_on": 10,
+    "v_max": 1,
+    "v_min": -1
+  },
+  "input_gain": 17.0,
+  "learning_rate": [
+    0.36804738847042845,
+    0.2350663091422778,
+    0.13196208090589237,
+    0.015558928515932262
+  ],
+  "linspace_max": 10.0,
+  "linspace_min": -10.0,
+  "linspace_samples": 30,
+  "max_newton_iters": 8,
+  "minimizer_impl": "custom",
+  "non_linearity": "single_diode_exponential",
+  "nudging": 1.5,
+  "num_epochs": 200,
+  "num_iterations": 512,
+  "overrelaxation_factor": 1.4,
+  "quadratic_diode_param": {
+    "diode_conductance": 1,
+    "v_max": 0.5,
+    "v_min": -0.5
+  },
+  "rel_tol": 1e-05,
+  "single_diode_updater": "custom",
+  "use_polish": true,
+  "vn_tol": 1e-06,
+  "voltage_amp": 4.0,
+  "weight_gains": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "weight_max": 100.0,
+  "weight_min": 1e-07,
+  "z_thresh": 10000000000.0
+}

@@ -1,0 +1,299 @@
+{
+  "hidden": {
+    "hidden_1": [
+      {
+        "iterations": 4,
+        "p50": 0.014055446442725737,
+        "p90": 0.02877685699010252,
+        "p95": 0.03204732532540167,
+        "p99": 0.03784304108110849,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter4/20260413-151902_experimental"
+      },
+      {
+        "iterations": 6,
+        "p50": 0.0035619996155117815,
+        "p90": 0.0072931605154556945,
+        "p95": 0.008121657208871617,
+        "p99": 0.009591001046243887,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter6/20260413-151907_experimental"
+      },
+      {
+        "iterations": 8,
+        "p50": 0.0009020459013512185,
+        "p90": 0.0018481422956060393,
+        "p95": 0.002057708172654126,
+        "p99": 0.00243056337324729,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter8/20260413-151913_experimental"
+      },
+      {
+        "iterations": 10,
+        "p50": 0.00022814363407613604,
+        "p90": 0.0004683054443648897,
+        "p95": 0.0005208081585802278,
+        "p99": 0.0006157499867676632,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter10/20260413-151918_experimental"
+      },
+      {
+        "iterations": 12,
+        "p50": 5.804853023304484e-05,
+        "p90": 0.00011893429433068122,
+        "p95": 0.00013148951911542462,
+        "p99": 0.00015577608006686082,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter12/20260413-151924_experimental"
+      },
+      {
+        "iterations": 14,
+        "p50": 1.7389712387326178e-05,
+        "p90": 3.0260849503536378e-05,
+        "p95": 3.317947690962103e-05,
+        "p99": 3.919911967617699e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter14/20260413-151929_experimental"
+      },
+      {
+        "iterations": 16,
+        "p50": 1.0097690098086133e-05,
+        "p90": 1.1530493791471679e-05,
+        "p95": 1.2001890526650547e-05,
+        "p99": 1.3244519920101388e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter16/20260413-151935_experimental"
+      },
+      {
+        "iterations": 32,
+        "p50": 8.567043765776818e-06,
+        "p90": 9.77242941860117e-06,
+        "p95": 1.010268764883789e-05,
+        "p99": 1.0482848915201004e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter32/20260413-151940_experimental"
+      },
+      {
+        "iterations": 64,
+        "p50": 8.567043765776818e-06,
+        "p90": 9.77242941860117e-06,
+        "p95": 1.010268764883789e-05,
+        "p99": 1.0482848915201004e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter64/20260413-151946_experimental"
+      },
+      {
+        "iterations": 128,
+        "p50": 8.567043765776818e-06,
+        "p90": 9.77242941860117e-06,
+        "p95": 1.010268764883789e-05,
+        "p99": 1.0482848915201004e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter128/20260413-151953_experimental"
+      },
+      {
+        "iterations": 256,
+        "p50": 8.567043765776818e-06,
+        "p90": 9.77242941860117e-06,
+        "p95": 1.010268764883789e-05,
+        "p99": 1.0482848915201004e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter256/20260413-152001_experimental"
+      },
+      {
+        "iterations": 512,
+        "p50": 8.567043765776818e-06,
+        "p90": 9.77242941860117e-06,
+        "p95": 1.010268764883789e-05,
+        "p99": 1.0482848915201004e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_1/overrelax1.0/iterations/iter512/20260413-152011_experimental"
+      }
+    ],
+    "hidden_2": [
+      {
+        "iterations": 4,
+        "p50": 0.33967652739810683,
+        "p90": 0.4151437378352235,
+        "p95": 0.43155252752655043,
+        "p99": 0.4555001088717871,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter4/20260302-152435_experimental"
+      },
+      {
+        "iterations": 6,
+        "p50": 0.13853211879319033,
+        "p90": 0.22930174815510937,
+        "p95": 0.25133951401782484,
+        "p99": 0.2817231001891583,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter6/20260302-152439_experimental"
+      },
+      {
+        "iterations": 8,
+        "p50": 0.03969137594315902,
+        "p90": 0.10708359151457385,
+        "p95": 0.13105140659838416,
+        "p99": 0.1625943547958502,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter8/20260302-152443_experimental"
+      },
+      {
+        "iterations": 10,
+        "p50": 0.009332472404369513,
+        "p90": 0.04185226509480747,
+        "p95": 0.05837027265859539,
+        "p99": 0.08501394801683038,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter10/20260302-152446_experimental"
+      },
+      {
+        "iterations": 12,
+        "p50": 0.002025096568575641,
+        "p90": 0.014264223149249116,
+        "p95": 0.02305196650394504,
+        "p99": 0.0406415681544563,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter12/20260302-152450_experimental"
+      },
+      {
+        "iterations": 14,
+        "p50": 0.00043506247051090975,
+        "p90": 0.00462369650605675,
+        "p95": 0.008507801418889885,
+        "p99": 0.01827919415025918,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter14/20260302-152454_experimental"
+      },
+      {
+        "iterations": 16,
+        "p50": 9.510496151850795e-05,
+        "p90": 0.0015335459303972752,
+        "p95": 0.0030676699564222056,
+        "p99": 0.007962101843697321,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter16/20260302-152458_experimental"
+      },
+      {
+        "iterations": 32,
+        "p50": 1.1715639948935212e-05,
+        "p90": 1.2452781660598836e-05,
+        "p95": 1.2716732843109266e-05,
+        "p99": 1.5402208648415537e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter32/20260302-152502_experimental"
+      },
+      {
+        "iterations": 64,
+        "p50": 1.1707572410948503e-05,
+        "p90": 1.2399452668269557e-05,
+        "p95": 1.2600954131401459e-05,
+        "p99": 1.3083035347447213e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter64/20260302-152506_experimental"
+      },
+      {
+        "iterations": 128,
+        "p50": 1.1707572410948503e-05,
+        "p90": 1.2399452668269557e-05,
+        "p95": 1.2600954131401459e-05,
+        "p99": 1.3083035347447213e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter128/20260302-152511_experimental"
+      },
+      {
+        "iterations": 256,
+        "p50": 1.1707572410948503e-05,
+        "p90": 1.2399452668269557e-05,
+        "p95": 1.2600954131401459e-05,
+        "p99": 1.3083035347447213e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter256/20260302-152518_experimental"
+      },
+      {
+        "iterations": 512,
+        "p50": 1.1707572410948503e-05,
+        "p90": 1.2399452668269557e-05,
+        "p95": 1.2600954131401459e-05,
+        "p99": 1.3083035347447213e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_2/rerun_02_03/omega_1.0/iter512/20260302-152528_experimental"
+      }
+    ],
+    "hidden_3": [
+      {
+        "iterations": 4,
+        "p50": 0.5068695945000086,
+        "p90": 0.5939384650079703,
+        "p95": 0.6171289968978423,
+        "p99": 0.6537831413141764,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter4/20260302-131526_experimental"
+      },
+      {
+        "iterations": 6,
+        "p50": 0.30097563422807,
+        "p90": 0.4155052791222348,
+        "p95": 0.45740042337884246,
+        "p99": 0.5062227535911125,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter6/20260302-131530_experimental"
+      },
+      {
+        "iterations": 8,
+        "p50": 0.14931736990158712,
+        "p90": 0.26460369394287936,
+        "p95": 0.31140931545415823,
+        "p99": 0.3740462489256799,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter8/20260302-131534_experimental"
+      },
+      {
+        "iterations": 10,
+        "p50": 0.05533941037292334,
+        "p90": 0.15466570755552764,
+        "p95": 0.19070454605372475,
+        "p99": 0.26823660683683404,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter10/20260302-131537_experimental"
+      },
+      {
+        "iterations": 12,
+        "p50": 0.017796991265619615,
+        "p90": 0.0768976350009803,
+        "p95": 0.09712536267702154,
+        "p99": 0.1861387861811796,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter12/20260302-131542_experimental"
+      },
+      {
+        "iterations": 14,
+        "p50": 0.005333708450697427,
+        "p90": 0.033195372765528676,
+        "p95": 0.04927076659634422,
+        "p99": 0.12349456867544174,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter14/20260302-131546_experimental"
+      },
+      {
+        "iterations": 16,
+        "p50": 0.0015794171736774115,
+        "p90": 0.01318855756953124,
+        "p95": 0.02056242893239345,
+        "p99": 0.07072727097992496,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter16/20260302-131550_experimental"
+      },
+      {
+        "iterations": 32,
+        "p50": 1.1088085632291324e-05,
+        "p90": 1.296282889724264e-05,
+        "p95": 2.416523750171743e-05,
+        "p99": 0.0003046602065357058,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter32/20260302-131555_experimental"
+      },
+      {
+        "iterations": 64,
+        "p50": 1.0984850942801566e-05,
+        "p90": 1.1684523599359849e-05,
+        "p95": 1.1961914894703946e-05,
+        "p99": 1.2676428119261383e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter64/20260302-131600_experimental"
+      },
+      {
+        "iterations": 128,
+        "p50": 1.0984850942801566e-05,
+        "p90": 1.1684523599359849e-05,
+        "p95": 1.2002559927752313e-05,
+        "p99": 1.2676428119261383e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter128/20260302-131608_experimental"
+      },
+      {
+        "iterations": 256,
+        "p50": 1.0984850942801566e-05,
+        "p90": 1.1684523599359849e-05,
+        "p95": 1.2002559927752313e-05,
+        "p99": 1.2676428119261383e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter256/20260302-131620_experimental"
+      },
+      {
+        "iterations": 512,
+        "p50": 1.0984850942801566e-05,
+        "p90": 1.1684523599359849e-05,
+        "p95": 1.2002559927752313e-05,
+        "p99": 1.2676428119261383e-05,
+        "run_dir": "<source-tree>/labs/figures_for_paper_digits/error_vs_iter/experimental/hidden_3/omega_1.0/iter512/20260302-131640_experimental"
+      }
+    ]
+  },
+  "non_linearity": "experimental"
+}

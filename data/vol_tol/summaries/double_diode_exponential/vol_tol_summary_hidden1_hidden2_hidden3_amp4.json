@@ -1,0 +1,119 @@
+{
+  "created_at": "2026-05-13T20:47:52.920214+00:00",
+  "non_linearity": "double_diode_exponential",
+  "source_artifact_root": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513",
+  "promotion_note": "Sidecar exp_clip=165 batch_size=1 voltage-tolerance rerun; not promoted unless copied into canonical amp_4_plots_data.",
+  "hidden": {
+    "hidden_1": [
+      {
+        "rel_tol": "1e-7",
+        "rel_tol_value": 1e-07,
+        "p90": 9.835229042002307e-06,
+        "run_dir": "20260513-223338_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_1/rel_tol_1e-7/20260513-223338_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-6",
+        "rel_tol_value": 1e-06,
+        "p90": 9.82140658349355e-06,
+        "run_dir": "20260513-223350_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_1/rel_tol_1e-6/20260513-223350_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-5",
+        "rel_tol_value": 1e-05,
+        "p90": 9.895678208434492e-06,
+        "run_dir": "20260513-223403_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_1/rel_tol_1e-5/20260513-223403_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-4",
+        "rel_tol_value": 0.0001,
+        "p90": 1.72717850483479e-05,
+        "run_dir": "20260513-223414_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_1/rel_tol_1e-4/20260513-223414_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-3",
+        "rel_tol_value": 0.001,
+        "p90": 6.979141706512459e-05,
+        "run_dir": "20260513-223424_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_1/rel_tol_1e-3/20260513-223424_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      }
+    ],
+    "hidden_2": [
+      {
+        "rel_tol": "1e-7",
+        "rel_tol_value": 1e-07,
+        "p90": 1.2433828425592596e-05,
+        "run_dir": "20260513-223434_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_2/rel_tol_1e-7/20260513-223434_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-6",
+        "rel_tol_value": 1e-06,
+        "p90": 1.2448930608224689e-05,
+        "run_dir": "20260513-223539_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_2/rel_tol_1e-6/20260513-223539_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-5",
+        "rel_tol_value": 1e-05,
+        "p90": 1.246081780685235e-05,
+        "run_dir": "20260513-223638_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_2/rel_tol_1e-5/20260513-223638_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-4",
+        "rel_tol_value": 0.0001,
+        "p90": 1.7957362849049446e-05,
+        "run_dir": "20260513-223731_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_2/rel_tol_1e-4/20260513-223731_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-3",
+        "rel_tol_value": 0.001,
+        "p90": 0.00012128628675730673,
+        "run_dir": "20260513-223815_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_2/rel_tol_1e-3/20260513-223815_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      }
+    ],
+    "hidden_3_amp_4": [
+      {
+        "rel_tol": "1e-7",
+        "rel_tol_value": 1e-07,
+        "p90": 1.1626916852027768e-05,
+        "run_dir": "20260513-223854_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_3/rel_tol_1e-7/20260513-223854_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-6",
+        "rel_tol_value": 1e-06,
+        "p90": 1.1636851001014083e-05,
+        "run_dir": "20260513-224036_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_3/rel_tol_1e-6/20260513-224036_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-5",
+        "rel_tol_value": 1e-05,
+        "p90": 1.1870536758570737e-05,
+        "run_dir": "20260513-224209_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_3/rel_tol_1e-5/20260513-224209_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-4",
+        "rel_tol_value": 0.0001,
+        "p90": 2.6308327278655778e-05,
+        "run_dir": "20260513-224331_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_3/rel_tol_1e-4/20260513-224331_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      },
+      {
+        "rel_tol": "1e-3",
+        "rel_tol_value": 0.001,
+        "p90": 0.0002009971287763837,
+        "run_dir": "20260513-224442_double_diode_exponential",
+        "source": "<source-tree>/labs/figures_for_paper_digits/error_vs_vol_tol/exp_clip_165_batch1_20260513/runs/double_diode_exponential/hidden_3/rel_tol_1e-3/20260513-224442_double_diode_exponential/error_npz/cross_layer_rel_l1_percentiles_node_weighted.json"
+      }
+    ]
+  }
+}
