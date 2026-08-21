@@ -53,8 +53,14 @@ every optimizer step.
 Adaptive equilibrium is disabled for training so each phase performs the
 configured fixed number of coordinate-descent iterations.
 
-The three Digits configurations are compact functional examples. The MNIST
-configuration preserves the paper DRN-XS architecture and hyperparameters:
+The three Digits configurations are compact functional examples. Each uses
+one hidden layer and four fixed coordinate-descent iterations. In the compact
+runner, omitting the Digits architecture inherits that one-hidden-layer source
+anchor; omitted iterations resolve to four for one hidden layer and eight for
+two, while explicit overrides take precedence.
+
+The MNIST configuration preserves the paper DRN-XS architecture and
+hyperparameters:
 
 - input shape `(2, 28, 28)` after positive/negative input duplication;
 - hidden width 100 and paired 20-node output;

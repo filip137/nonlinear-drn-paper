@@ -15,8 +15,24 @@ solver, dataset, architecture, and runtime settings.
 
 ### Digits
 
-This trains a two-hidden-layer double-Shockley DRN. Digits is bundled with
+This trains the compact double-Shockley anchor. Digits is bundled with
 scikit-learn and requires no download.
+
+```bash
+python scripts/train_drn.py \
+  --dataset digits \
+  --non-linearity double \
+  --parameter-set paper-digits \
+  --epochs 10 \
+  --batch-size 32 \
+  --device cpu
+```
+
+Omitting `--hidden-sizes` inherits the parameter source's one-hidden-layer
+architecture (width 32 for this double-Shockley source). The corresponding
+Digits solver default is four coordinate-descent iterations.
+
+To define a two-hidden-layer run, supply both widths:
 
 ```bash
 python scripts/train_drn.py \
@@ -25,10 +41,11 @@ python scripts/train_drn.py \
   --non-linearity double \
   --parameter-set paper-digits \
   --epochs 10 \
-  --batch-size 32 \
-  --num-iterations 16 \
   --device cpu
 ```
+
+With two hidden layers and no `--num-iterations` override, the runner uses
+eight iterations.
 
 For a quick end-to-end check, add:
 
@@ -39,7 +56,10 @@ For a quick end-to-end check, add:
 ### MNIST
 
 The exact paper DRN-XS electrical and solver parameters are available for the
-double-Shockley model:
+double-Shockley model. Before using `--device cuda`, install
+`requirements-cuda.txt` in the repository `.venv` and run
+`python scripts/reproduce.py verify --device cuda` as described in the
+[main README](../README.md#clone-and-install).
 
 ```bash
 python scripts/train_drn.py \
@@ -100,11 +120,23 @@ selected parameter source when their flags are omitted:
 | `paper-digits` | measured/PWL | 0.01 | 10 | Digits, one hidden layer of width 32 |
 | `paper-mnist-xs` | double Shockley | 0.15 / 0.08 / 0.05 (weight / weight / bias) | 50 | MNIST accuracy-panel DRN-XS, one hidden layer of width 100 |
 
+Architecture is optional for Digits as well. When `--hidden-sizes` is omitted,
+the selected source supplies its one-hidden-layer anchor: width 64 for single
+Shockley and width 32 for double Shockley or measured/PWL. Omitted Digits
+solver iterations depend on the resulting depth: four for one hidden layer and
+eight for two hidden layers. An explicit `--hidden-sizes` or
+`--num-iterations` value takes precedence. The bundled Digits JSON
+configurations all use one hidden layer and four fixed iterations.
+For three or more hidden layers, the runner retains the selected source's
+iteration count; set `--num-iterations` explicitly when exploring those
+depths.
+
 These are known-working anchors rather than a claim that one rate is optimal
 for every depth and width. On the deterministic Digits split (`seed=0`), the
-15-epoch anchors reached 93.6% test accuracy for single Shockley and 93.1% for
-both double Shockley and measured/PWL. These checks validate the runner and its
-defaults; they are not additional paper results.
+15-epoch, four-sweep anchors reached 93.6% test accuracy for single Shockley
+and 93.1% for both double Shockley and measured/PWL on the Python 3.12 CPU
+reference stack. These checks validate the runner and its defaults; they are
+not additional paper results.
 
 A uniform source default is expanded to every conductance and bias tensor when
 the architecture is resized. The single-Shockley source instead preserves the
@@ -159,7 +191,6 @@ creating an output directory, loading a dataset, or starting training:
 ```bash
 python scripts/train_drn.py \
   --dataset digits \
-  --hidden-sizes 64 \
   --non-linearity single \
   --parameter-set paper-digits \
   --dry-run
@@ -175,18 +206,20 @@ from repro import DRNRunSpec, run_drn
 
 experiment = DRNRunSpec(
     dataset="digits",
-    hidden_sizes=(128, 64),
     non_linearity="double",
     parameter_set="paper-digits",
     epochs=10,
     batch_size=32,
-    num_iterations=16,
     seed=0,
 )
 
 result = run_drn(experiment, device="cpu")
 print(result.output_dir)
 ```
+
+This inherits the double-Shockley one-hidden-layer width and therefore uses
+four iterations. Set `hidden_sizes=(128, 64)` to define two hidden layers; if
+`num_iterations` remains omitted, that depth uses eight iterations.
 
 Useful optional fields on `DRNRunSpec` include `nudging`, `input_gain`,
 `learning_rate`, `voltage_amp`, `current_amp`, `weight_gain`,

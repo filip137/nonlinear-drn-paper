@@ -32,9 +32,9 @@ It provides three levels of reproduction:
   reference environment; Python 3.13 uses a separately pinned compatible
   stack and can have small numerical differences.
 - A CPU is sufficient for installation checks, plotting, Digits experiments,
-  and short training runs. An NVIDIA GPU with a compatible CUDA-enabled
-  PyTorch installation is recommended for full MNIST training and numerical
-  replay.
+  and short training runs. An NVIDIA GPU is recommended for full MNIST
+  training and numerical replay; the repository provides a separately pinned
+  CUDA 12.4 environment for that path.
 
 The repository is self-contained at the source and artifact level: it does not
 need a parent checkout or a manually configured `PYTHONPATH`. Installing the
@@ -49,6 +49,7 @@ cd nonlinear-drn-paper
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
+# CPU environment
 python -m pip install -r requirements.txt
 python scripts/reproduce.py verify
 ```
@@ -58,11 +59,27 @@ the bundled inputs. No dataset is downloaded and no training is started. If
 `pip` prints an `ERROR`, the installation is incomplete; recreate the virtual
 environment before continuing.
 
-The requirements select matched CPU builds automatically: PyTorch 2.5.1 with
-Torchvision 0.20.1 on Python 3.12, and PyTorch 2.6.0 with Torchvision 0.21.0 on
-Python 3.13. For GPU runs, install the corresponding CUDA builds for the chosen
-Python version before installing the remaining pinned dependencies. Use Python
-3.12 when reproducing the paper's reference numerical results.
+`requirements.txt` selects matched CPU builds automatically: PyTorch 2.5.1
+with Torchvision 0.20.1 on Python 3.12, and PyTorch 2.6.0 with Torchvision
+0.21.0 on Python 3.13. Use Python 3.12 when reproducing the paper's reference
+numerical results.
+
+For an NVIDIA GPU, install the complete CUDA 12.4 environment instead of the
+CPU requirements, then require CUDA during verification:
+
+```bash
+source .venv/bin/activate
+python -c "import sys; print(sys.executable)"
+python -m pip install -r requirements-cuda.txt
+python scripts/reproduce.py verify --device cuda
+```
+
+The printed interpreter must end in
+`nonlinear-drn-paper/.venv/bin/python`. Do not launch from the Conda `base`
+interpreter: an unrelated PyTorch build there may require a newer CUDA driver
+than the machine provides. The CUDA verification deliberately fails when the
+GPU stack is unavailable; training requested with `--device cuda` never
+silently falls back to CPU.
 
 ## Run a first simulation
 
@@ -72,7 +89,6 @@ creating output or starting training:
 ```bash
 python scripts/train_drn.py \
   --dataset digits \
-  --hidden-sizes 64 \
   --non-linearity double \
   --parameter-set paper-digits \
   --dry-run
@@ -83,7 +99,6 @@ Then run one training and evaluation batch on CPU:
 ```bash
 python scripts/train_drn.py \
   --dataset digits \
-  --hidden-sizes 64 \
   --non-linearity double \
   --parameter-set paper-digits \
   --epochs 1 \
@@ -93,9 +108,12 @@ python scripts/train_drn.py \
 ```
 
 This uses the bundled scikit-learn Digits dataset, so it needs no download.
-The runner chooses audited learning-rate, input-gain, electrical, and solver
-defaults from `paper-digits`; the generated configuration and checkpoints are
-written under `outputs/training/runner/`.
+With `--hidden-sizes` omitted, the runner inherits the one-hidden-layer anchor
+from the selected parameter source (width 32 for double Shockley). A
+one-hidden-layer Digits run defaults to four coordinate-descent iterations.
+The runner also chooses audited learning-rate, input-gain, electrical, and
+solver defaults from `paper-digits`; the generated configuration and
+checkpoints are written under `outputs/training/runner/`.
 
 ## Define a training run
 
@@ -113,6 +131,11 @@ python scripts/train_drn.py \
   --epochs 10 \
   --device cpu
 ```
+
+This explicit architecture has two hidden layers, so an omitted
+`--num-iterations` resolves to eight. Digits uses four iterations for one
+hidden layer and eight for two; explicit `--hidden-sizes` and
+`--num-iterations` values always win.
 
 Use `--dataset mnist --download` for MNIST, and choose `single`, `double`, or
 `pwl` for the three paper nonlinearities. The selected parameter set supplies
@@ -165,6 +188,9 @@ python scripts/reproduce.py train \
   --device cpu \
   --epochs 15
 ```
+
+All three bundled Digits training configurations use one hidden layer and
+four fixed coordinate-descent iterations.
 
 The paper MNIST setup is in
 `configs/train/mnist_paper_double_shockley.json`. MNIST itself is not

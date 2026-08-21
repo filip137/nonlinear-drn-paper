@@ -70,6 +70,23 @@ final mean is 97.02%; the best mean curve value is 97.0725%.
 
 ## Launch a canonical replication
 
+Full training should use the repository's pinned CUDA 12.4 environment. From
+the repository root, activate the repository virtual environment and verify
+that it is the active interpreter before launching:
+
+```bash
+source .venv/bin/activate
+python -c "import sys; print(sys.executable)"
+python -m pip install -r requirements-cuda.txt
+python scripts/reproduce.py verify --device cuda
+```
+
+The interpreter path must end in
+`nonlinear-drn-paper/.venv/bin/python`, not the Conda `base` interpreter. CUDA
+verification and CUDA training fail explicitly if the installed PyTorch build,
+NVIDIA driver, and device are incompatible; there is no automatic CPU
+fallback.
+
 The ready-to-run preset contains the audited values:
 
 ```bash

@@ -44,7 +44,10 @@ def test_runner_builds_each_paper_nonlinearity(
     assert config["weight_gains"] == [1.0, 1.0, 1.0]
     assert config["learning_rates"] == [0.01] * 5
     assert config["num_epochs"] == 3
+    assert config["num_iterations"] == 8
     assert config["adaptive_equilibrium"] is False
+    assert config["runner"]["hidden_sizes_source"] == "user"
+    assert config["runner"]["num_iterations_source"] == "digits-depth-default"
     assert config["quadratic_diode_param"]
     assert config["exponential_diode_param"]
     assert config["hard_sigmoid_param"]
@@ -52,6 +55,35 @@ def test_runner_builds_each_paper_nonlinearity(
         (ROOT / "configs" / "train" / "schema.json").read_text(encoding="utf-8")
     )
     jsonschema.validate(config, schema)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_hidden_width", "output_width"),
+    [
+        ("single", 64, 10),
+        ("double", 32, 20),
+        ("pwl", 32, 20),
+    ],
+)
+def test_runner_inherits_one_hidden_layer_digits_anchors(
+    name: str,
+    expected_hidden_width: int,
+    output_width: int,
+) -> None:
+    config = build_training_config(
+        DRNRunSpec(
+            dataset="digits",
+            non_linearity=name,
+            parameter_set="paper-digits",
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["layer_shapes"] == [[128], [expected_hidden_width], [output_width]]
+    assert config["num_iterations"] == 4
+    assert config["runner"]["hidden_sizes"] == [expected_hidden_width]
+    assert config["runner"]["hidden_sizes_source"] == "parameter-source"
+    assert config["runner"]["num_iterations_source"] == "digits-depth-default"
 
 
 def test_runner_builds_variable_mnist_architecture_and_layerwise_rates() -> None:
@@ -78,10 +110,45 @@ def test_runner_builds_variable_mnist_architecture_and_layerwise_rates() -> None
     assert config["learning_rates"] == list(rates)
     assert config["batch_size"] == 8
     assert config["num_iterations"] == 6
+    assert config["runner"]["num_iterations_source"] == "user"
     assert config["adaptive_equilibrium"] is False
     assert config["scheduler_gamma"] == 0.99
     assert config["dataset"]["normalize_standard_deviation"] == 0.3081
     assert config["dataset"]["normalize_scale"] == 0.3
+
+
+def test_runner_keeps_mnist_source_iterations_when_omitted() -> None:
+    config = build_training_config(
+        DRNRunSpec(
+            dataset="mnist",
+            non_linearity="double",
+            parameter_set="paper-mnist-xs",
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["layer_shapes"] == [[2, 28, 28], [100], [20]]
+    assert config["num_iterations"] == 4
+    assert config["runner"]["hidden_sizes_source"] == "parameter-source"
+    assert config["runner"]["num_iterations_source"] == "parameter-source"
+
+
+def test_runner_preserves_explicit_digits_iterations_and_positional_api() -> None:
+    config = build_training_config(
+        DRNRunSpec(
+            "digits",
+            (48,),
+            "double",
+            num_iterations=7,
+            parameter_set="paper-digits",
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["layer_shapes"] == [[128], [48], [20]]
+    assert config["num_iterations"] == 7
+    assert config["runner"]["hidden_sizes_source"] == "user"
+    assert config["runner"]["num_iterations_source"] == "user"
 
 
 @pytest.mark.parametrize(
@@ -163,8 +230,6 @@ def test_runner_dry_run_prints_resolved_config_without_training(capsys: pytest.C
         [
             "--dataset",
             "digits",
-            "--hidden-sizes",
-            "64",
             "--learning-rate",
             "0.01",
             "--non-linearity",
@@ -178,8 +243,11 @@ def test_runner_dry_run_prints_resolved_config_without_training(capsys: pytest.C
     printed = json.loads(capsys.readouterr().out)
 
     assert status == 0
-    assert printed["layer_shapes"] == [[128], [64], [20]]
+    assert printed["layer_shapes"] == [[128], [32], [20]]
+    assert printed["num_iterations"] == 4
     assert printed["runner"]["parameter_source"].startswith("parameter-set:paper-digits")
+    assert printed["runner"]["hidden_sizes_source"] == "parameter-source"
+    assert printed["runner"]["num_iterations_source"] == "digits-depth-default"
 
 
 def test_runner_executes_variable_depth_training(tmp_path: Path) -> None:

@@ -17,10 +17,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_training_configs_cover_all_paper_nonlinearities() -> None:
-    paths = sorted((ROOT / "configs" / "train").glob("digits_*.json"))
+    paths = [
+        ROOT / "configs" / "train" / name
+        for name in (
+            "digits_single_shockley.json",
+            "digits_double_shockley.json",
+            "digits_pwl.json",
+        )
+    ]
     loaded = [load_training_config(path, repo_root=ROOT)[0] for path in paths]
     assert {config.non_linearity for config in loaded} == set(PAPER_NONLINEARITIES)
     for config in loaded:
+        assert len(config.layer_shapes) == 3
+        assert config.num_iterations == 4
         assert config.quadratic_diode_param
         assert config.exponential_diode_param
         assert config.hard_sigmoid_param

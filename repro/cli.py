@@ -35,9 +35,15 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("list", help="List manifest jobs and bundled artifact counts.")
-    sub.add_parser(
+    verify = sub.add_parser(
         "verify",
         help="Verify the installed scientific environment and manifest checksums.",
+    )
+    verify.add_argument(
+        "--device",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help="Also require an initialized CUDA device when set to cuda.",
     )
     sub.add_parser(
         "figures",
@@ -129,7 +135,10 @@ def main() -> int:
         from repro.environment import verify_environment
 
         try:
-            versions = verify_environment()
+            requirements_file = (
+                "requirements-cuda.txt" if args.device == "cuda" else "requirements.txt"
+            )
+            versions = verify_environment(requirements_file=requirements_file)
         except RuntimeError as exc:
             print(f"environment: failed: {exc}", file=sys.stderr)
             return 1
@@ -138,6 +147,18 @@ def main() -> int:
             f"(Python {versions['python']}; NumPy {versions['numpy']}; "
             f"PyTorch {versions['torch']}; Torchvision {versions['torchvision']})"
         )
+        if args.device == "cuda":
+            from repro.device import cuda_summary
+
+            try:
+                cuda = cuda_summary()
+            except RuntimeError as exc:
+                print(f"cuda: failed: {exc}", file=sys.stderr)
+                return 1
+            print(
+                "cuda: ok "
+                f"(PyTorch {cuda['torch']}; CUDA {cuda['runtime']}; {cuda['device']})"
+            )
         manifest.verify_checksums()
         print("checksums: ok")
         return 0

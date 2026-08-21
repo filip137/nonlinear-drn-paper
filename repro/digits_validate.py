@@ -16,6 +16,7 @@ from model.function.network import Network
 from model.resistive.minimizer import MinimizerSettings, QuadraticMinimizer
 from model.resistive.network import DeepResistiveEnergy
 from repro.config import RuntimeConfig, load_runtime_config, parse_layer_shapes
+from repro.device import resolve_device
 from repro.iv_data import load_iv_data
 from repro.manifest import ReproJob
 
@@ -51,7 +52,7 @@ class IndexedDataset(torch.utils.data.Dataset):
 def run_validation(pack_root: Path, job: ReproJob, *, device: str = "cpu") -> ValidationResult:
     cfg = load_runtime_config(job.config_path(pack_root), pack_root=pack_root, num_iterations=job.num_iterations)
     _set_seed(cfg.seed)
-    torch_device = _resolve_device(device)
+    torch_device = resolve_device(device)
     run_dir = job.output_dir(pack_root)
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -142,12 +143,6 @@ def _pack_rel(path: Path, pack_root: Path) -> str:
         return str(path.relative_to(pack_root))
     except ValueError:
         return str(path)
-
-
-def _resolve_device(value: str) -> torch.device:
-    if value == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("Expected CUDA to be available for --device cuda. Provided value: cuda.")
-    return torch.device(value)
 
 
 def _digits_loaders(batch_size: int, device: torch.device, seed: int | None):

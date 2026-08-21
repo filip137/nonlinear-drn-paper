@@ -65,16 +65,20 @@ class DRNRunSpec:
 
     ``parameter_set`` and ``parameter_config`` are mutually exclusive. One
     must be supplied so that physical diode parameters are always explicit.
-    When ``learning_rate`` or ``input_gain`` is omitted, the selected parameter
-    source supplies its known-working value and preserves its weight/bias
-    policy when the depth changes. A scalar learning rate is expanded over all
-    dense weights and hidden-layer biases. A sequence must contain either one
-    value or exactly ``2H + 1`` values for ``H`` hidden layers.
+    When ``hidden_sizes`` is omitted, the selected parameter source supplies
+    its anchor architecture. When ``learning_rate`` or ``input_gain`` is
+    omitted, that source supplies its known-working value and preserves its
+    weight/bias policy when the depth changes. A scalar learning rate is
+    expanded over all dense weights and hidden-layer biases. A sequence must
+    contain either one value or exactly ``2H + 1`` values for ``H`` hidden
+    layers.
     """
 
     dataset: str
-    hidden_sizes: Sequence[int]
-    non_linearity: str
+    hidden_sizes: Sequence[int] | None = None
+    # The empty default preserves the original positional field order while
+    # build_training_config still requires a recognized nonlinearity.
+    non_linearity: str = ""
     learning_rate: float | Sequence[float] | None = None
     parameter_set: str | None = None
     parameter_config: str | Path | None = None
@@ -104,7 +108,6 @@ def build_training_config(
     root = _resolve_repo_root(repo_root)
     dataset = _canonical_dataset(spec.dataset)
     non_linearity = _canonical_non_linearity(spec.non_linearity)
-    hidden_sizes = _validate_hidden_sizes(spec.hidden_sizes, non_linearity)
     source_path, source_label = _resolve_parameter_source(
         root,
         non_linearity,
@@ -122,6 +125,11 @@ def build_training_config(
             f"Expected parameter source non_linearity to be {non_linearity!r}. "
             f"Provided value: {source_non_linearity!r} from {source_path}."
         )
+    hidden_sizes, hidden_sizes_source = _resolve_hidden_sizes(
+        spec.hidden_sizes,
+        source_config.layer_shapes,
+        non_linearity,
+    )
 
     config = copy.deepcopy(source)
     config.pop("expected_results", None)
@@ -144,7 +152,13 @@ def build_training_config(
     config["adaptive_equilibrium"] = False
     _apply_optional_override(config, "num_epochs", spec.epochs, integer=True)
     _apply_optional_override(config, "batch_size", spec.batch_size, integer=True)
-    _apply_optional_override(config, "num_iterations", spec.num_iterations, integer=True)
+    num_iterations, num_iterations_source = _resolve_num_iterations(
+        spec.num_iterations,
+        source_config.num_iterations,
+        dataset=dataset,
+        hidden_layer_count=len(hidden_sizes),
+    )
+    config["num_iterations"] = num_iterations
     _apply_optional_override(config, "nudging", spec.nudging)
     _apply_optional_override(config, "input_gain", spec.input_gain)
     _apply_optional_override(config, "voltage_amp", spec.voltage_amp)
@@ -155,9 +169,11 @@ def build_training_config(
         "parameter_source": source_label,
         "dataset": dataset,
         "hidden_sizes": list(hidden_sizes),
+        "hidden_sizes_source": hidden_sizes_source,
         "learning_rate_argument": _json_number_or_list(spec.learning_rate),
         "learning_rate_source": learning_rate_source,
         "input_gain_source": "user" if spec.input_gain is not None else "parameter-source",
+        "num_iterations_source": num_iterations_source,
         "non_linearity_argument": spec.non_linearity,
         "adaptive_equilibrium": False,
     }
@@ -248,9 +264,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--hidden-sizes",
         type=int,
         nargs="+",
-        required=True,
+        default=None,
         metavar="N",
-        help="Hidden-layer widths, e.g. --hidden-sizes 128 64.",
+        help=(
+            "Hidden-layer widths, e.g. --hidden-sizes 128 64. "
+            "Defaults to the parameter source's one-hidden-layer anchor."
+        ),
     )
     parser.add_argument(
         "--learning-rate",
@@ -285,7 +304,15 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument("--num-iterations", type=int, default=None)
+    parser.add_argument(
+        "--num-iterations",
+        type=int,
+        default=None,
+        help=(
+            "Coordinate-descent sweeps per phase. For Digits, defaults to 4 "
+            "with one hidden layer and 8 with two hidden layers."
+        ),
+    )
     parser.add_argument("--nudging", type=float, default=None)
     parser.add_argument(
         "--input-gain",
@@ -330,7 +357,7 @@ def main(argv: Sequence[str] | None = None, *, repo_root: Path | None = None) ->
         learning_rate = tuple(args.learning_rate)
     spec = DRNRunSpec(
         dataset=args.dataset,
-        hidden_sizes=tuple(args.hidden_sizes),
+        hidden_sizes=None if args.hidden_sizes is None else tuple(args.hidden_sizes),
         learning_rate=learning_rate,
         non_linearity=args.non_linearity,
         parameter_set=args.parameter_set,
@@ -409,6 +436,48 @@ def _validate_hidden_sizes(values: Sequence[int], non_linearity: str) -> tuple[i
             f"reverse-oriented nodes can be paired. Provided value: {list(sizes)!r}."
         )
     return sizes
+
+
+def _resolve_hidden_sizes(
+    value: Sequence[int] | None,
+    source_layer_shapes: Sequence[Sequence[int]],
+    non_linearity: str,
+) -> tuple[tuple[int, ...], str]:
+    if value is not None:
+        return _validate_hidden_sizes(value, non_linearity), "user"
+
+    hidden_shapes = tuple(
+        tuple(int(width) for width in shape)
+        for shape in source_layer_shapes[1:-1]
+    )
+    if not hidden_shapes or any(len(shape) != 1 for shape in hidden_shapes):
+        raise ValueError(
+            "Expected the parameter source to define at least one dense hidden layer "
+            "when hidden_sizes is omitted. "
+            f"Provided value: {list(source_layer_shapes)!r}."
+        )
+    sizes = tuple(shape[0] for shape in hidden_shapes)
+    return _validate_hidden_sizes(sizes, non_linearity), "parameter-source"
+
+
+def _resolve_num_iterations(
+    value: int | None,
+    source_value: int,
+    *,
+    dataset: str,
+    hidden_layer_count: int,
+) -> tuple[int, str]:
+    if value is not None:
+        resolved = int(value)
+        if resolved <= 0:
+            raise ValueError(
+                "Expected num_iterations to be positive. "
+                f"Provided value: {value!r}."
+            )
+        return resolved, "user"
+    if dataset == "digits" and hidden_layer_count in {1, 2}:
+        return 4 * hidden_layer_count, "digits-depth-default"
+    return int(source_value), "parameter-source"
 
 
 def _resolve_parameter_source(

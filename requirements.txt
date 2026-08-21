@@ -1,14 +1,8 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-matplotlib==3.10.6
-numpy==2.0.1; python_version == "3.12"
-numpy==2.1.3; python_version == "3.13"
-scikit-learn==1.7.2
-scipy==1.16.0
-sympy==1.13.1
+-r requirements-common.txt
 # Python 3.12 is the paper's reference stack. PyTorch 2.6.0 is the first
 # matched torch/torchvision release pair with wheels for Python 3.13.
 torch==2.5.1; python_version == "3.12"
 torch==2.6.0; python_version == "3.13"
-torchlambertw @ git+https://github.com/gmgeorg/torchlambertw.git@d365cac4d9a3e6074a03709cf865b4896e3f3cd4
 torchvision==0.20.1; python_version == "3.12"
 torchvision==0.21.0; python_version == "3.13"

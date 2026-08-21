@@ -1,0 +1,8 @@
+# CUDA 12.4 is supported by both pinned Python stacks and by the reference
+# host driver. Exact local-version pins prevent pip from selecting CPU wheels.
+--extra-index-url https://download.pytorch.org/whl/cu124
+-r requirements-common.txt
+torch==2.5.1+cu124; python_version == "3.12"
+torch==2.6.0+cu124; python_version == "3.13"
+torchvision==0.20.1+cu124; python_version == "3.12"
+torchvision==0.21.0+cu124; python_version == "3.13"

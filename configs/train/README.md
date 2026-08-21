@@ -11,12 +11,12 @@ for changing solver values, read
 
 ## Bundled parameter sources
 
-| File | Dataset | Active nonlinear updater |
-|---|---|---|
-| `digits_single_shockley.json` | Digits | single-Shockley Lambert-W |
-| `digits_double_shockley.json` | Digits | double-Shockley float64 Lambert-W with overrelaxation |
-| `digits_pwl.json` | Digits | measured/PWL damped Newton |
-| `mnist_paper_double_shockley.json` | MNIST | paper DRN-XS float64 Lambert-W |
+| File | Dataset | Architecture / fixed sweeps | Active nonlinear updater |
+|---|---|---|---|
+| `digits_single_shockley.json` | Digits | one hidden layer / 4 | single-Shockley Lambert-W |
+| `digits_double_shockley.json` | Digits | one hidden layer / 4 | double-Shockley float64 Lambert-W with overrelaxation |
+| `digits_pwl.json` | Digits | one hidden layer / 4 | measured/PWL damped Newton |
+| `mnist_paper_double_shockley.json` | MNIST | one hidden layer / 4 | paper DRN-XS float64 Lambert-W |
 
 These files use a complete common schema. Consequently, they retain some
 compatibility fields that are inactive for the chosen nonlinearity. In
@@ -28,3 +28,8 @@ JSON does not support comments. Keep explanatory text in the shared schema and
 reference rather than adding ad hoc comment keys to individual experiment
 files. Use `python scripts/train_drn.py ... --dry-run` to inspect the fully
 expanded configuration before launching a run.
+
+For the compact runner, omitting `--hidden-sizes` inherits the selected
+parameter source's architecture. Digits then defaults to four iterations for
+one hidden layer and eight for two hidden layers. Explicit architecture and
+iteration overrides always take precedence over these runner defaults.

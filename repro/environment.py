@@ -55,7 +55,9 @@ def expected_versions() -> dict[str, str]:
     return {**_COMMON_VERSIONS, **_STACKS[python_key]}
 
 
-def verify_environment() -> dict[str, str]:
+def verify_environment(
+    *, requirements_file: str = "requirements.txt"
+) -> dict[str, str]:
     """Validate the pinned packages and import their compiled extensions."""
 
     expected = expected_versions()
@@ -77,7 +79,7 @@ def verify_environment() -> dict[str, str]:
     if problems:
         raise RuntimeError(
             "Expected the complete pinned environment from "
-            "`python -m pip install -r requirements.txt`. "
+            f"`python -m pip install -r {requirements_file}`. "
             f"Provided: {'; '.join(problems)}."
         )
 

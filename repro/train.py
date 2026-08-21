@@ -19,6 +19,7 @@ from model.function.cost import SquaredError, SquaredErrorPairedOutputs
 from model.function.network import Network
 from model.resistive.minimizer import MinimizerSettings, QuadraticMinimizer
 from model.resistive.network import DeepResistiveEnergy
+from repro.device import resolve_device
 from repro.iv_data import load_iv_data
 from training.sgd import AugmentedFunction, EquilibriumProp
 
@@ -218,7 +219,7 @@ def run_training(
             f"Expected num_iterations to be positive. Provided value: {resolved_iterations!r}."
         )
 
-    torch_device = _resolve_device(device)
+    torch_device = resolve_device(device)
     _set_seed(cfg.seed)
     if output_dir is None:
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -727,14 +728,6 @@ def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-
-
-def _resolve_device(value: str) -> torch.device:
-    if value == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("Expected CUDA to be available for --device cuda. Provided value: 'cuda'.")
-    if value not in {"cpu", "cuda"}:
-        raise ValueError("Expected device to be 'cpu' or 'cuda'. " f"Provided value: {value!r}.")
-    return torch.device(value)
 
 
 def _required(data: dict[str, Any], name: str) -> Any:

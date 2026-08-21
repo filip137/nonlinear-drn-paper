@@ -21,7 +21,7 @@
   "iv_data_path": "data/assets/experimental_curve_voff_0.8_200_points.npz",
   "batch_size": 32,
   "num_epochs": 15,
-  "num_iterations": 32,
+  "num_iterations": 4,
   "learning_rates": [0.01, 0.01, 0.01],
   "scheduler_gamma": 1.0,
   "nudging": 0.1,
