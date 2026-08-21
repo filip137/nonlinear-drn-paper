@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
+from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator, NullLocator
 
 
 FAMILY_LABELS = {
@@ -44,6 +44,31 @@ STATIC_FIGURES = (
     "figures/shockley_iv.pdf",
     "figures/experiments/circuits2_cropped.pdf",
 )
+
+
+def regenerate_mnist_assets(repo_root: Path) -> list[Path]:
+    """Regenerate the two MNIST panels directly from bundled numerical data."""
+
+    output_root = repo_root / "outputs" / "paper"
+    records: list[dict[str, Any]] = []
+    generated = _generate_mnist_assets(repo_root, output_root, records)
+    manifest_path = output_root / "mnist_asset_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "asset_count": len(records),
+                "matplotlib_version": matplotlib.__version__,
+                "protocol": "data/paper/mnist/training_protocol.json",
+                "assets": records,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return generated
 
 
 def regenerate_paper_assets(repo_root: Path) -> list[Path]:
@@ -139,40 +164,7 @@ def regenerate_paper_assets(repo_root: Path) -> list[Path]:
         _record(records, repo_root, target, [source], "matplotlib:conditioning")
         generated.append(target)
 
-    source = (
-        repo_root
-        / "data"
-        / "paper"
-        / "mnist"
-        / "mean_test_accuracy_selected_runs_with_perfect_diode.json"
-    )
-    target = (
-        output_root
-        / "figures"
-        / "supplementary"
-        / "mnist"
-        / "mean_test_accuracy_selected_runs_with_perfect_diode.png"
-    )
-    _plot_mnist_accuracy(source, target)
-    _record(records, repo_root, target, [source], "matplotlib:mnist-accuracy")
-    generated.append(target)
-
-    pca_dir = repo_root / "data" / "paper" / "pca_sweep"
-    pca_sources = [
-        pca_dir / "pca_sweep_iter4.npz",
-        pca_dir / "pca_sweep_iter4_flat_spice_layers.npz",
-        pca_dir / "run_info.json",
-    ]
-    target = (
-        output_root
-        / "figures"
-        / "supplementary"
-        / "mnist"
-        / "pca_sweep_rel_l1_blue_dots_x1e3_log_scale.png"
-    )
-    _plot_pca_error(*pca_sources, target)
-    _record(records, repo_root, target, pca_sources, "matplotlib:pca-relative-error")
-    generated.append(target)
+    generated.extend(_generate_mnist_assets(repo_root, output_root, records))
 
     source = (
         repo_root
@@ -253,6 +245,52 @@ def regenerate_paper_assets(repo_root: Path) -> list[Path]:
         encoding="utf-8",
     )
     return generated
+
+
+def _generate_mnist_assets(
+    repo_root: Path,
+    output_root: Path,
+    records: list[dict[str, Any]],
+) -> list[Path]:
+    accuracy_source = (
+        repo_root
+        / "data"
+        / "paper"
+        / "mnist"
+        / "mean_test_accuracy_selected_runs_with_perfect_diode.json"
+    )
+    accuracy_target = (
+        output_root
+        / "figures"
+        / "supplementary"
+        / "mnist"
+        / "mean_test_accuracy_selected_runs_with_perfect_diode.png"
+    )
+    _plot_mnist_accuracy(accuracy_source, accuracy_target)
+    _record(
+        records,
+        repo_root,
+        accuracy_target,
+        [accuracy_source],
+        "matplotlib:mnist-accuracy",
+    )
+
+    pca_dir = repo_root / "data" / "paper" / "pca_sweep"
+    pca_sources = [
+        pca_dir / "pca_sweep_iter4.npz",
+        pca_dir / "pca_sweep_iter4_flat_spice_layers.npz",
+        pca_dir / "run_info.json",
+    ]
+    pca_target = (
+        output_root
+        / "figures"
+        / "supplementary"
+        / "mnist"
+        / "pca_sweep_rel_l1_blue_dots_x1e3_log_scale.png"
+    )
+    _plot_pca_error(*pca_sources, pca_target)
+    _record(records, repo_root, pca_target, pca_sources, "matplotlib:pca-relative-error")
+    return [accuracy_target, pca_target]
 
 
 def _plot_error_vs_iterations(source: Path, target: Path, family: str) -> None:
@@ -645,6 +683,7 @@ def _plot_mnist_accuracy(source: Path, target: Path) -> None:
     ax.set_xlim(int(concatenated_steps.min()), int(concatenated_steps.max()))
     padding = max(0.2, 0.05 * (maximum - minimum))
     ax.set_ylim(minimum - padding, maximum + padding)
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
     _save_figure(fig, target, dpi=300, bbox_inches="tight")
 

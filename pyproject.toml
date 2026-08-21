@@ -24,6 +24,9 @@ dependencies = [
   "torchvision==0.20.1",
 ]
 
+[project.urls]
+Repository = "https://github.com/filip137/nonlinear-drn-paper"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

@@ -20,6 +20,7 @@ def configure_environment() -> None:
         "OPENBLAS_NUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1",
         "MPLBACKEND": "Agg",
+        "MPLCONFIGDIR": "/tmp/matplotlib",
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
@@ -37,6 +38,10 @@ def parse_args() -> argparse.Namespace:
     sub.add_parser(
         "figures",
         help="Regenerate every paper figure/table asset from bundled curated inputs.",
+    )
+    sub.add_parser(
+        "mnist-figures",
+        help="Regenerate only the paper's MNIST accuracy and PCA panels.",
     )
 
     train = sub.add_parser("train", help="Train one DRN configuration with equilibrium propagation.")
@@ -125,6 +130,13 @@ def main() -> int:
 
         outputs = regenerate_paper_assets(PACK_ROOT)
         print(f"wrote {len(outputs)} paper assets under {PACK_ROOT / 'outputs' / 'paper'}")
+        return 0
+    if args.command == "mnist-figures":
+        from repro.paper_figures import regenerate_mnist_assets
+
+        outputs = regenerate_mnist_assets(PACK_ROOT)
+        for output in outputs:
+            print(f"wrote {output.relative_to(PACK_ROOT)}")
         return 0
     if args.command == "train":
         from repro.train import run_training

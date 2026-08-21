@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "purpose": "Audited provenance for the two MNIST panels used by the paper and for the standalone training preset.",
+  "accuracy_panel": {
+    "paper_asset": "figures/supplementary/mnist/mean_test_accuracy_selected_runs_with_perfect_diode.png",
+    "bundled_curve_data": "data/paper/mnist/mean_test_accuracy_selected_runs_with_perfect_diode.json",
+    "double_shockley_training": {
+      "source_config_sha256": "feee53e27cb39e4f88209e8b6894764cd061d552276f0e12980d5bb3d1187153",
+      "selected_run_ids": [
+        "20260325-154905_train-stats",
+        "20260325-192519_train-stats",
+        "20260326-021631_train-stats",
+        "20260325-225016_train-stats"
+      ],
+      "original_seed_status": "not recorded",
+      "canonical_standalone_rerun_seeds": [0, 1, 2, 3],
+      "dataset": {
+        "name": "MNIST",
+        "train_samples": 60000,
+        "test_samples": 10000,
+        "batch_size": 16,
+        "augmentation": false,
+        "normalization_formula": "0.3 * (pixel - 0.1307) / 0.3081",
+        "normalization_note": "The historical config field normalize_std=0.3 was a post-normalization multiplier, not the denominator passed to torchvision Normalize."
+      },
+      "network": {
+        "layer_shapes": [[2, 28, 28], [100], [20]],
+        "input_encoding": "concatenate normalized input and its negative along the channel dimension",
+        "input_gain": 50.0,
+        "weight_gains": [1.0, 1.0],
+        "weight_bounds": [1e-7, 100.0],
+        "weight_initialization": "kaiming_uniform",
+        "output_encoding": "10 paired outputs"
+      },
+      "device_model": {
+        "non_linearity": "double_diode_exponential",
+        "I_s": 1e-6,
+        "V_t": 0.05,
+        "V_off": 1.0,
+        "voltage_amp": 1.0,
+        "current_amp": 1.0
+      },
+      "training": {
+        "epochs": 100,
+        "equilibrium_propagation_variant": "centered",
+        "nudging": 0.05,
+        "source_labeled_learning_rates": {
+          "weights": [0.08, 0.05],
+          "biases": [0.15]
+        },
+        "historical_rate_concatenation_order": ["biases", "weights"],
+        "optimizer_parameter_order": ["DenseWeight_0", "DenseWeight_1", "Bias_0"],
+        "effective_initial_learning_rates": [0.15, 0.08, 0.05],
+        "effective_rate_mapping": {
+          "DenseWeight_0": 0.15,
+          "DenseWeight_1": 0.08,
+          "Bias_0": 0.05
+        },
+        "learning_rate_audit_note": "The historical runner concatenated the bias-labeled list before the weight-labeled list, while the optimizer consumed dense weights before biases. The standalone config records the effective optimizer mapping, not the labels in the source JSON.",
+        "scheduler": "ExponentialLR",
+        "scheduler_gamma_per_epoch": 0.99,
+        "momentum": 0.0,
+        "weight_decay": 0.0
+      },
+      "solver": {
+        "coordinate_descent_sweeps_per_phase": 4,
+        "mode": "asynchronous",
+        "adaptive_equilibrium": false,
+        "double_diode_updater": "float64 Lambert-W updater (historical CustomExponentialDoubleDiodeUpdater)",
+        "polish": false,
+        "exp_clip": 165.0,
+        "z_threshold": 10000000000.0,
+        "max_newton_iterations": 32,
+        "configured_overrelaxation_factor": 1.1,
+        "overrelaxation_note": "The selected custom float64 updater did not apply overrelaxation; the source config nevertheless recorded the factor."
+      },
+      "reported_aggregate": {
+        "run_count": 4,
+        "final_mean_test_accuracy_percent": 97.02000004053116,
+        "best_mean_test_accuracy_percent": 97.0725000500679,
+        "final_min_test_accuracy_percent": 96.88000011444092,
+        "final_max_test_accuracy_percent": 97.23000001907349
+      }
+    },
+    "ideal_diode_baseline": {
+      "run_count": 4,
+      "output_width": 10,
+      "final_mean_test_accuracy_percent": 96.6375,
+      "best_mean_test_accuracy_percent": 96.7025,
+      "note": "The portable mean/min/max curves are bundled for plotting; this baseline is not the nonlinear MNIST training preset."
+    }
+  },
+  "pca_panel": {
+    "paper_asset": "figures/supplementary/mnist/pca_sweep_rel_l1_blue_dots_x1e3_log_scale.png",
+    "source_config_sha256": "566d6c0d18cb757f6d9bbcd4ef36096604481d516e749ab3ea7a912bbed3d518",
+    "network": {
+      "layer_shapes": [[2, 28, 28], [100], [20]],
+      "input_gain": 20.0,
+      "non_linearity": "double_diode_exponential",
+      "I_s": 1e-6,
+      "V_t": 0.05,
+      "V_off": 0.5
+    },
+    "checkpoint_training_config": {
+      "source_labeled_learning_rates": {
+        "weights": [0.1, 0.1],
+        "biases": [0.1]
+      },
+      "effective_initial_learning_rates": [0.1, 0.1, 0.1],
+      "configured_training_sweeps": 8,
+      "nudging": 0.01,
+      "scheduler_gamma_per_epoch": 0.99
+    },
+    "evaluation": {
+      "coordinate_descent_sweeps": 4,
+      "grid_shape": [30, 30],
+      "pca_extent_standard_deviations": 3.0
+    },
+    "bundled_inputs": [
+      "data/paper/pca_sweep/pca_sweep_iter4.npz",
+      "data/paper/pca_sweep/pca_sweep_iter4_flat_spice_layers.npz",
+      "data/paper/pca_sweep/run_info.json"
+    ],
+    "note": "The PCA panel validates a separate historical checkpoint and therefore has input gain 20, not the gain-50 setting of the accuracy panel. The raw CD and SPICE states needed to regenerate the panel are bundled."
+  },
+  "reproducibility_limit": "The exact aggregate plot is reproducible from bundled numerical curves. Exact retraining of the four original trajectories is not claimable because their random seeds were not recorded; new canonical seed-0 through seed-3 runs are independent replications."
+}

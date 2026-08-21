@@ -49,6 +49,7 @@ class TrainingConfig:
     num_epochs: int
     num_iterations: int
     learning_rates: list[float]
+    scheduler_gamma: float
     nudging: float
     ep_variant: str
     minimizer_impl: str
@@ -136,6 +137,13 @@ def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig
             "Provided value: None."
         )
 
+    adaptive_equilibrium = _required(raw, "adaptive_equilibrium")
+    if not isinstance(adaptive_equilibrium, bool):
+        raise ValueError(
+            "Expected config 'adaptive_equilibrium' to be the boolean false during training. "
+            f"Provided value: {adaptive_equilibrium!r}."
+        )
+
     config = TrainingConfig(
         description=str(raw.get("description", "")),
         dataset=dataset,
@@ -155,6 +163,7 @@ def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig
         num_epochs=int(_required(raw, "num_epochs")),
         num_iterations=int(_required(raw, "num_iterations")),
         learning_rates=[float(value) for value in _required_list(raw, "learning_rates")],
+        scheduler_gamma=float(_required(raw, "scheduler_gamma")),
         nudging=float(_required(raw, "nudging")),
         ep_variant=_required_str(raw, "ep_variant"),
         minimizer_impl=_required_str(raw, "minimizer_impl"),
@@ -162,7 +171,7 @@ def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig
         single_diode_updater=_required_str(raw, "single_diode_updater"),
         double_diode_updater=_required_str(raw, "double_diode_updater"),
         overrelaxation_factor=float(_required(raw, "overrelaxation_factor")),
-        adaptive_equilibrium=bool(_required(raw, "adaptive_equilibrium")),
+        adaptive_equilibrium=adaptive_equilibrium,
         rel_tol=float(_required(raw, "rel_tol")),
         vn_tol=float(_required(raw, "vn_tol")),
         use_polish=bool(_required(raw, "use_polish")),
@@ -273,6 +282,10 @@ def run_training(
         momentum=0.0,
         weight_decay=0.0,
     )
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        optimizer,
+        gamma=cfg.scheduler_gamma,
+    )
 
     resolved = dict(raw)
     resolved["config_path"] = _relative_or_absolute(config_path, repo_root)
@@ -306,6 +319,9 @@ def run_training(
             train_loader,
             max_batches=max_batches,
         )
+        # Match the paper loop: epoch 1 uses the configured rates, then rates
+        # are decayed before epoch 2 begins.
+        scheduler.step()
         test_loss, test_accuracy = _evaluate(
             network,
             cost_fn,
@@ -334,6 +350,13 @@ def run_training(
     metadata = {
         "non_linearity": cfg.non_linearity,
         "dataset": cfg.dataset.get("name"),
+        "layer_shapes": [list(shape) for shape in cfg.layer_shapes],
+        "learning_rates": cfg.learning_rates,
+        "scheduler_gamma": cfg.scheduler_gamma,
+        "final_learning_rates": [group["lr"] for group in optimizer.param_groups],
+        "scheduler_step_timing": "after-training-epoch",
+        "input_gain": cfg.input_gain,
+        "adaptive_equilibrium": cfg.adaptive_equilibrium,
         "seed": cfg.seed,
         "device": str(torch_device),
         "epochs": resolved_epochs,
@@ -441,15 +464,7 @@ def _build_loaders(
     dataset_root = Path(str(root_value)).expanduser()
     if not dataset_root.is_absolute():
         dataset_root = repo_root / dataset_root
-    transform_steps: list[Any] = [transforms.ToTensor()]
-    if bool(cfg.dataset.get("normalize", True)):
-        transform_steps.append(
-            transforms.Normalize(
-                (float(cfg.dataset.get("normalize_mean", 0.1307)),),
-                (float(cfg.dataset.get("normalize_std", 0.3)),),
-            )
-        )
-    transform = transforms.Compose(transform_steps)
+    transform = _build_mnist_transform(cfg.dataset, transforms)
     try:
         train_dataset = datasets.MNIST(
             root=dataset_root,
@@ -479,6 +494,42 @@ def _build_loaders(
         DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True, generator=generator),
         DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False),
     )
+
+
+def _build_mnist_transform(dataset: dict[str, Any], transforms):
+    transform_steps: list[Any] = [transforms.ToTensor()]
+    if bool(dataset.get("normalize", True)):
+        normalize_mean = float(dataset.get("normalize_mean", 0.1307))
+        normalize_standard_deviation = float(
+            dataset.get("normalize_standard_deviation", 0.3081)
+        )
+        # In the historical runner, ``normalize_std`` was a multiplier applied
+        # after standard MNIST normalization. Keep it as a legacy alias while
+        # using an unambiguous field name in this repository.
+        normalize_scale = float(
+            dataset.get("normalize_scale", dataset.get("normalize_std", 1.0))
+        )
+        if normalize_standard_deviation <= 0.0:
+            raise ValueError(
+                "Expected config 'dataset.normalize_standard_deviation' to be positive. "
+                f"Provided value: {normalize_standard_deviation!r}."
+            )
+        if normalize_scale <= 0.0:
+            raise ValueError(
+                "Expected config 'dataset.normalize_scale' to be positive. "
+                f"Provided value: {normalize_scale!r}."
+            )
+        transform_steps.append(
+            transforms.Normalize(
+                (normalize_mean,),
+                (normalize_standard_deviation,),
+            )
+        )
+        if not math.isclose(normalize_scale, 1.0):
+            transform_steps.append(
+                transforms.Lambda(lambda tensor, scale=normalize_scale: tensor * scale)
+            )
+    return transforms.Compose(transform_steps)
 
 
 def _build_minimizer(cfg: TrainingConfig, fn, free_layers, num_iterations: int):
@@ -615,6 +666,7 @@ def _validate_scalar_fields(cfg: TrainingConfig) -> None:
         "num_epochs": cfg.num_epochs,
         "num_iterations": cfg.num_iterations,
         "nudging": cfg.nudging,
+        "scheduler_gamma": cfg.scheduler_gamma,
         "rel_tol": cfg.rel_tol,
         "vn_tol": cfg.vn_tol,
         "experimental_newton_tol": cfg.experimental_newton_tol,
@@ -624,6 +676,11 @@ def _validate_scalar_fields(cfg: TrainingConfig) -> None:
             raise ValueError(
                 f"Expected config '{name}' to be positive. Provided value: {value!r}."
             )
+    if cfg.adaptive_equilibrium:
+        raise ValueError(
+            "Expected config 'adaptive_equilibrium' to be false during training. "
+            f"Provided value: {cfg.adaptive_equilibrium!r}."
+        )
     if cfg.weight_min > cfg.weight_max:
         raise ValueError(
             "Expected config 'weight_min' to be no greater than 'weight_max'. "

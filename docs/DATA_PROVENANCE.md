@@ -33,7 +33,8 @@ for the PWL training configuration.
 assets:
 
 - `mnist/`: mean/min/max test-accuracy series for four selected
-  double-Shockley runs and four perfect-diode baseline runs;
+  double-Shockley runs and four perfect-diode baseline runs, plus an audited
+  machine-readable training protocol;
 - `pca_sweep/`: the raw 30×30 coordinate-descent grid, matching SPICE layer
   states, and portable grid metadata;
 - `overrelaxation/`: P90 error values for the hidden-3, width-128 relaxation

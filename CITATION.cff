@@ -16,6 +16,7 @@ abstract: >-
   measurements for the paper Fast simulation of nonlinear deep resistive
   networks for energy-based computation.
 license: MIT
+repository-code: "https://github.com/filip137/nonlinear-drn-paper"
 preferred-citation:
   type: article
   title: "Fast simulation of nonlinear deep resistive networks for energy-based computation"

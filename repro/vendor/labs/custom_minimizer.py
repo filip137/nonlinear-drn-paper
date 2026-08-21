@@ -1,9 +1,10 @@
 """Validation-only coordinate-descent minimizers for the digits repro pack.
 
-This is a paper-runtime subset of labs/custom_minimizer.py.  It keeps only the
-updaters used by the bundled digits-core jobs: single-diode exponential,
-double-diode exponential, and experimental I-V validation.  Training,
-Anderson acceleration, and exploratory nonlinearities are intentionally omitted.
+This is a paper-runtime subset of labs/custom_minimizer.py. It keeps the
+updaters needed to train and validate the three bundled nonlinearities:
+single-diode exponential, double-diode exponential, and measured/PWL I-V.
+Anderson acceleration, timing instrumentation, and exploratory nonlinearities
+are intentionally omitted.
 """
 
 from __future__ import annotations

@@ -1,12 +1,13 @@
 {
-  "description": "Paper MNIST DRN-XS configuration (double Shockley diode, centered equilibrium propagation).",
-  "source": "paper_mnist_exp/config.used.json, model drn-xs",
+  "description": "Paper MNIST accuracy-run protocol (DRN-XS, double Shockley diode, centered equilibrium propagation).",
+  "source": "four selected paper_mnist_exp/voltage_amp1_current_amp1 runs; see data/paper/mnist/training_protocol.json",
   "dataset": {
     "name": "mnist",
     "root": "data/external/mnist",
     "normalize": true,
     "normalize_mean": 0.1307,
-    "normalize_std": 0.3
+    "normalize_standard_deviation": 0.3081,
+    "normalize_scale": 0.3
   },
   "layer_shapes": [[2, 28, 28], [100], [20]],
   "non_linearity": "double_diode_exponential",
@@ -23,28 +24,32 @@
   "batch_size": 16,
   "num_epochs": 100,
   "num_iterations": 4,
-  "learning_rates": [0.15, 0.15, 0.15],
+  "learning_rates": [0.15, 0.08, 0.05],
+  "scheduler_gamma": 0.99,
   "nudging": 0.05,
   "ep_variant": "centered",
   "minimizer_impl": "custom",
   "mode": "asynchronous",
   "single_diode_updater": "custom",
   "double_diode_updater": "float64",
-  "overrelaxation_factor": 1.0,
-  "adaptive_equilibrium": true,
+  "overrelaxation_factor": 1.1,
+  "adaptive_equilibrium": false,
   "rel_tol": 1e-5,
   "vn_tol": 1e-6,
-  "use_polish": true,
+  "use_polish": false,
   "max_newton_iters": 32,
   "z_thresh": 1e10,
-  "exp_clip": 100000.0,
+  "exp_clip": 165.0,
   "damping": 0.5,
   "experimental_newton_max_steps": 100,
   "experimental_newton_tol": 1e-5,
   "seed": 0,
   "expected_results": {
-    "test_error_percent": 3.46,
-    "train_error_percent": 2.94,
-    "reported_runtime": "about 30 minutes on the original host"
+    "selected_run_count": 4,
+    "final_mean_test_accuracy_percent": 97.02000004053116,
+    "best_mean_test_accuracy_percent": 97.0725000500679,
+    "final_test_accuracy_range_percent": [96.88000011444092, 97.23000001907349],
+    "reported_runtime": "roughly 3.5 hours per 100-epoch run on the original host",
+    "note": "The four original runs did not record seeds; seed 0 is the standalone canonical rerun seed."
   }
 }

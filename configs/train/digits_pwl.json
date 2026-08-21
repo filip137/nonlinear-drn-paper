@@ -22,6 +22,7 @@
   "num_epochs": 15,
   "num_iterations": 32,
   "learning_rates": [0.01, 0.01, 0.01],
+  "scheduler_gamma": 1.0,
   "nudging": 0.1,
   "ep_variant": "centered",
   "minimizer_impl": "custom",

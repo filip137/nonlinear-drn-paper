@@ -41,6 +41,39 @@ python scripts/reproduce.py figures
 Generated assets are written under `outputs/paper/` with the same relative
 paths and filenames used by the manuscript. The checked-in originals under
 `paper/reference/` are comparison targets, not inputs to the generated plots.
+To regenerate only the two MNIST panels, run
+`python scripts/reproduce.py mnist-figures`; the audited gain, learning-rate,
+normalization, and solver provenance is in
+[docs/MNIST_REPRODUCTION.md](docs/MNIST_REPRODUCTION.md).
+
+## Simple experiment runner
+
+For exploratory training, `scripts/train_drn.py` follows the compact style of
+the original Scellier fast-DRN examples: specify the dataset, hidden-layer
+sizes, and nonlinearity together, with optional overrides for the learning rate
+and other training parameters.
+
+```bash
+python scripts/train_drn.py \
+  --dataset digits \
+  --hidden-sizes 128 64 \
+  --non-linearity double \
+  --parameter-set paper-digits \
+  --epochs 10 \
+  --device cpu
+```
+
+Use `--dataset mnist --download` for MNIST, and choose `single`, `double`, or
+`pwl` for the three paper nonlinearities. The selected parameter set supplies
+known-working learning-rate and input-gain defaults; `--learning-rate` and
+`--input-gain` override them. The parameter set is required because it also
+supplies explicit physical diode parameters, which are never silently
+invented. Adaptive equilibrium is disabled during training. Every run saves
+the fully expanded configuration beside its checkpoints.
+
+The same interface is available as the Python function `repro.run_drn`.
+See [docs/TRAINING_RUNNER.md](docs/TRAINING_RUNNER.md) for Digits, MNIST,
+layerwise-learning-rate, dry-run, and custom-parameter examples.
 
 ## Training
 
