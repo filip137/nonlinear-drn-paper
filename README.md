@@ -28,8 +28,9 @@ It provides three levels of reproduction:
 
 - Git, which is needed both to clone this repository and to install the pinned
   Lambert-W dependency.
-- Python 3.10–3.13 with `venv` and `pip`. Python 3.12 is the reference
-  environment.
+- Python 3.12 or 3.13 with `venv` and `pip`. Python 3.12 is the paper's
+  reference environment; Python 3.13 uses a separately pinned compatible
+  stack and can have small numerical differences.
 - A CPU is sufficient for installation checks, plotting, Digits experiments,
   and short training runs. An NVIDIA GPU with a compatible CUDA-enabled
   PyTorch installation is recommended for full MNIST training and numerical
@@ -52,13 +53,16 @@ python -m pip install -r requirements.txt
 python scripts/reproduce.py verify
 ```
 
-`verify` checks the integrity of the bundled scientific inputs. No dataset is
-downloaded and no training is started.
+`verify` checks both the installed scientific environment and the integrity of
+the bundled inputs. No dataset is downloaded and no training is started. If
+`pip` prints an `ERROR`, the installation is incomplete; recreate the virtual
+environment before continuing.
 
-For GPU runs, create an environment with the CUDA build of PyTorch 2.5.1 and
-Torchvision 0.20.1 appropriate for the machine, then install the remaining
-pinned dependencies. The CPU reference installation above is the simplest way
-to try the repository.
+The requirements select matched CPU builds automatically: PyTorch 2.5.1 with
+Torchvision 0.20.1 on Python 3.12, and PyTorch 2.6.0 with Torchvision 0.21.0 on
+Python 3.13. For GPU runs, install the corresponding CUDA builds for the chosen
+Python version before installing the remaining pinned dependencies. Use Python
+3.12 when reproducing the paper's reference numerical results.
 
 ## Run a first simulation
 

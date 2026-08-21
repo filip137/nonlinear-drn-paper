@@ -6,17 +6,26 @@ on:
 
 jobs:
   test:
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install CPU dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Check dependency consistency
+        run: python -m pip check
       - name: Verify bundled artifacts
         run: python scripts/reproduce.py verify
       - name: Run tests
         run: python -m pytest
+      - name: Replay one bundled checkpoint
+        run: python scripts/reproduce.py validate --group error_vs_iter --limit 1 --device cpu

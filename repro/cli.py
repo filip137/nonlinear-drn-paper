@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from repro.manifest import PackManifest
@@ -34,7 +35,10 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("list", help="List manifest jobs and bundled artifact counts.")
-    sub.add_parser("verify", help="Verify manifest checksums.")
+    sub.add_parser(
+        "verify",
+        help="Verify the installed scientific environment and manifest checksums.",
+    )
     sub.add_parser(
         "figures",
         help="Regenerate every paper figure/table asset from bundled curated inputs.",
@@ -122,6 +126,18 @@ def main() -> int:
     if args.command == "list":
         return command_list(manifest)
     if args.command == "verify":
+        from repro.environment import verify_environment
+
+        try:
+            versions = verify_environment()
+        except RuntimeError as exc:
+            print(f"environment: failed: {exc}", file=sys.stderr)
+            return 1
+        print(
+            "environment: ok "
+            f"(Python {versions['python']}; NumPy {versions['numpy']}; "
+            f"PyTorch {versions['torch']}; Torchvision {versions['torchvision']})"
+        )
         manifest.verify_checksums()
         print("checksums: ok")
         return 0
