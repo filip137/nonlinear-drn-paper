@@ -24,29 +24,76 @@ It provides three levels of reproduction:
    smoke tests, together with the exact MNIST double-Shockley configuration
    used for the paper experiment.
 
-## Quick start
+## Prerequisites
 
-Python 3.12 is the reference environment. A CPU-only installation is enough
-for figures and smoke tests.
+- Git, which is needed both to clone this repository and to install the pinned
+  Lambert-W dependency.
+- Python 3.10–3.13 with `venv` and `pip`. Python 3.12 is the reference
+  environment.
+- A CPU is sufficient for installation checks, plotting, Digits experiments,
+  and short training runs. An NVIDIA GPU with a compatible CUDA-enabled
+  PyTorch installation is recommended for full MNIST training and numerical
+  replay.
+
+The repository is self-contained at the source and artifact level: it does not
+need a parent checkout or a manually configured `PYTHONPATH`. Installing the
+Python dependencies requires internet access. MNIST is the only dataset that
+is downloaded separately, and only when `--download` is supplied.
+
+## Clone and install
 
 ```bash
-python -m venv .venv
+git clone https://github.com/filip137/nonlinear-drn-paper.git
+cd nonlinear-drn-paper
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python scripts/reproduce.py verify
-python scripts/reproduce.py figures
 ```
 
-Generated assets are written under `outputs/paper/` with the same relative
-paths and filenames used by the manuscript. The checked-in originals under
-`paper/reference/` are comparison targets, not inputs to the generated plots.
-To regenerate only the two MNIST panels, run
-`python scripts/reproduce.py mnist-figures`; the audited gain, learning-rate,
-normalization, and solver provenance is in
-[docs/MNIST_REPRODUCTION.md](docs/MNIST_REPRODUCTION.md).
+`verify` checks the integrity of the bundled scientific inputs. No dataset is
+downloaded and no training is started.
 
-## Simple experiment runner
+For GPU runs, create an environment with the CUDA build of PyTorch 2.5.1 and
+Torchvision 0.20.1 appropriate for the machine, then install the remaining
+pinned dependencies. The CPU reference installation above is the simplest way
+to try the repository.
+
+## Run a first simulation
+
+First inspect a fully expanded one-hidden-layer Digits experiment without
+creating output or starting training:
+
+```bash
+python scripts/train_drn.py \
+  --dataset digits \
+  --hidden-sizes 64 \
+  --non-linearity double \
+  --parameter-set paper-digits \
+  --dry-run
+```
+
+Then run one training and evaluation batch on CPU:
+
+```bash
+python scripts/train_drn.py \
+  --dataset digits \
+  --hidden-sizes 64 \
+  --non-linearity double \
+  --parameter-set paper-digits \
+  --epochs 1 \
+  --max-batches 1 \
+  --max-eval-batches 1 \
+  --device cpu
+```
+
+This uses the bundled scikit-learn Digits dataset, so it needs no download.
+The runner chooses audited learning-rate, input-gain, electrical, and solver
+defaults from `paper-digits`; the generated configuration and checkpoints are
+written under `outputs/training/runner/`.
+
+## Define a training run
 
 For exploratory training, `scripts/train_drn.py` follows the compact style of
 the original Scellier fast-DRN examples: specify the dataset, hidden-layer
@@ -74,6 +121,29 @@ the fully expanded configuration beside its checkpoints.
 The same interface is available as the Python function `repro.run_drn`.
 See [docs/TRAINING_RUNNER.md](docs/TRAINING_RUNNER.md) for Digits, MNIST,
 layerwise-learning-rate, dry-run, and custom-parameter examples.
+
+Every checked training JSON points to an editor-aware schema. See
+[configs/train/README.md](configs/train/README.md) for the available parameter
+sources and [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) for the full
+field reference, including the Lambert-W large-argument threshold,
+exponent-clipping guard, Newton-polish settings, and which values are inactive
+for each nonlinearity.
+
+## Reproduce the paper figures
+
+Regenerate every data-driven manuscript asset from the bundled inputs:
+
+```bash
+python scripts/reproduce.py figures
+```
+
+Generated assets are written under `outputs/paper/` with the same relative
+paths and filenames used by the manuscript. The checked-in originals under
+`paper/reference/` are comparison targets, not inputs to the generated plots.
+To regenerate only the two MNIST panels, run
+`python scripts/reproduce.py mnist-figures`; the audited gain, learning-rate,
+normalization, and solver provenance is in
+[docs/MNIST_REPRODUCTION.md](docs/MNIST_REPRODUCTION.md).
 
 ## Training
 
@@ -128,12 +198,28 @@ Wall-clock plots always use the bundled measurements because timings are
 machine-dependent. SPICE netlist generation is not part of this minimal
 artifact; the required SPICE state arrays and timing measurements are bundled.
 
+## Acknowledgments and provenance
+
+This repository extends the coordinate-descent formulation and DRN simulation
+framework introduced by Benjamin Scellier in
+[“A fast algorithm to simulate nonlinear resistive networks”](https://proceedings.mlr.press/v235/scellier24a.html),
+ICML 2024, PMLR 235:43477–43503. The original work establishes the fast exact
+coordinate-descent method for ideal-diode networks; this artifact extends that
+framework to the paper's non-ideal Shockley and measured/PWL nonlinearities.
+
+The original MIT copyright for Benjamin Scellier, Maxence Ernoult, and Rain
+Neuromorphics Inc. is retained in [LICENSE](LICENSE). See [NOTICE](NOTICE) for
+the code and scientific provenance statement.
+
 ## Repository map
 
 - `configs/train/`: ready-to-run training configurations.
 - `data/`: selected weights, reference NPZ files, figure inputs, and checksums.
 - `paper/reference/`: the exact manuscript assets used as visual references.
-- `repro/`: training, validation, comparison, aggregation, and plotting code.
+- `repro/vendor/model/resistive/minimizer.py`: canonical coordinate updaters
+  and minimizer selection, in the original model layout.
+- `repro/`: training, validation, measured-data loading, comparison,
+  aggregation, and plotting code.
 - `scripts/reproduce.py`: single command-line entry point.
 - `docs/`: data provenance and reproduction notes.
 - `tests/`: fast integrity, configuration, plotting, and training checks.

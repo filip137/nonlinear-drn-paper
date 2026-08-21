@@ -1,0 +1,31 @@
+Nonlinear DRN paper reproducibility artifact
+============================================
+
+Copyright (c) 2023 Benjamin Scellier and Maxence Ernoult,
+Rain Neuromorphics Inc.
+Copyright (c) 2026 Filip Osana
+
+Software and scientific provenance
+----------------------------------
+
+This repository extends the coordinate-descent formulation and deep resistive
+network simulation framework introduced by:
+
+Benjamin Scellier, "A fast algorithm to simulate nonlinear resistive
+networks," Proceedings of the 41st International Conference on Machine
+Learning, Proceedings of Machine Learning Research 235:43477-43503, 2024.
+https://proceedings.mlr.press/v235/scellier24a.html
+
+The original work treats ideal-diode nonlinear resistive networks. This
+artifact builds on that layered DRN model, odd-even coordinate-update scheme,
+and equilibrium-propagation training framework while adding the non-ideal
+single-Shockley, antiparallel double-Shockley, and measured piecewise-linear
+nonlinearities studied in the accompanying paper.
+
+The core model and training subset under repro/vendor is adapted from the
+MIT-licensed research code whose original copyright is retained above and in
+LICENSE. Subsequent solver, reproduction, documentation, and experiment-runner
+changes are copyright (c) 2026 Filip Osana.
+
+This acknowledgment describes provenance and does not alter the permissions or
+conditions of the MIT License.

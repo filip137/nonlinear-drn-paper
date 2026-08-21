@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/train/schema.json",
   "description": "Paper MNIST accuracy-run protocol (DRN-XS, double Shockley diode, centered equilibrium propagation).",
   "source": "four selected paper_mnist_exp/voltage_amp1_current_amp1 runs; see data/paper/mnist/training_protocol.json",
   "dataset": {

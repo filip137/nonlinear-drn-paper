@@ -11,11 +11,12 @@ import torch
 from sklearn.datasets import load_digits
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from labs.custom_minimizer import CustomQuadraticMinimizer, MinimizerSettings
 from model.function.cost import SquaredError, SquaredErrorPairedOutputs
 from model.function.network import Network
+from model.resistive.minimizer import MinimizerSettings, QuadraticMinimizer
 from model.resistive.network import DeepResistiveEnergy
 from repro.config import RuntimeConfig, load_runtime_config, parse_layer_shapes
+from repro.iv_data import load_iv_data
 from repro.manifest import ReproJob
 
 
@@ -213,7 +214,8 @@ def _build_minimizer(cfg: RuntimeConfig, energy_fn, free_layers):
     )
     if cfg.minimizer_impl != "custom":
         raise ValueError(f"Expected minimizer_impl to be 'custom'. Provided value: {cfg.minimizer_impl!r}.")
-    return CustomQuadraticMinimizer(
+    iv_data = load_iv_data(cfg.iv_data_path) if cfg.non_linearity == "experimental" else None
+    return QuadraticMinimizer(
         fn=energy_fn,
         free_layers=free_layers,
         num_iterations=cfg.num_iterations,
@@ -223,8 +225,7 @@ def _build_minimizer(cfg: RuntimeConfig, energy_fn, free_layers):
         exponential_diode_param=cfg.exponential_diode_param,
         voltage_amp=energy_fn.voltage_amp,
         current_amp=energy_fn.current_amp,
-        iv_data=None,
-        iv_data_path=cfg.iv_data_path,
+        iv_data=iv_data,
         double_diode_updater=cfg.double_diode_updater,
         adaptive_equilibrium=cfg.adaptive_equilibrium,
         overrelaxation_factor=cfg.overrelaxation_factor,

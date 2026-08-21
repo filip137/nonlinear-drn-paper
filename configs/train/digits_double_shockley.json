@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/train/schema.json",
   "description": "Compact sklearn Digits training configuration for the paper's double-Shockley nonlinearity.",
   "dataset": {
     "name": "digits",
