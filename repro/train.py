@@ -15,10 +15,11 @@ import torch
 from sklearn.datasets import load_digits
 from torch.utils.data import DataLoader, Subset, TensorDataset, random_split
 
-from labs.custom_minimizer import CustomQuadraticMinimizer, MinimizerSettings
 from model.function.cost import SquaredError, SquaredErrorPairedOutputs
 from model.function.network import Network
+from model.resistive.minimizer import MinimizerSettings, QuadraticMinimizer
 from model.resistive.network import DeepResistiveEnergy
+from repro.iv_data import load_iv_data
 from training.sgd import AugmentedFunction, EquilibriumProp
 
 
@@ -553,7 +554,8 @@ def _build_minimizer(cfg: TrainingConfig, fn, free_layers, num_iterations: int):
         exp_clip=cfg.exp_clip,
         experimental_newton_tol=cfg.experimental_newton_tol,
     )
-    return CustomQuadraticMinimizer(
+    iv_data = load_iv_data(cfg.iv_data_path) if cfg.non_linearity == "experimental" else None
+    return QuadraticMinimizer(
         fn=fn,
         free_layers=free_layers,
         num_iterations=num_iterations,
@@ -563,8 +565,7 @@ def _build_minimizer(cfg: TrainingConfig, fn, free_layers, num_iterations: int):
         exponential_diode_param=cfg.exponential_diode_param,
         voltage_amp=cfg.voltage_amp,
         current_amp=cfg.current_amp,
-        iv_data=None,
-        iv_data_path=cfg.iv_data_path,
+        iv_data=iv_data,
         double_diode_updater=cfg.double_diode_updater,
         adaptive_equilibrium=cfg.adaptive_equilibrium,
         overrelaxation_factor=cfg.overrelaxation_factor,

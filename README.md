@@ -216,7 +216,10 @@ the code and scientific provenance statement.
 - `configs/train/`: ready-to-run training configurations.
 - `data/`: selected weights, reference NPZ files, figure inputs, and checksums.
 - `paper/reference/`: the exact manuscript assets used as visual references.
-- `repro/`: training, validation, comparison, aggregation, and plotting code.
+- `repro/vendor/model/resistive/minimizer.py`: canonical coordinate updaters
+  and minimizer selection, in the original model layout.
+- `repro/`: training, validation, measured-data loading, comparison,
+  aggregation, and plotting code.
 - `scripts/reproduce.py`: single command-line entry point.
 - `docs/`: data provenance and reproduction notes.
 - `tests/`: fast integrity, configuration, plotting, and training checks.

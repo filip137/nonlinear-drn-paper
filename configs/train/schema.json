@@ -117,7 +117,7 @@
     "scheduler_gamma": {"type": "number", "exclusiveMinimum": 0, "description": "Multiplicative learning-rate decay applied after every epoch; 1 disables decay."},
     "nudging": {"type": "number", "exclusiveMinimum": 0, "description": "Magnitude of the equilibrium-propagation nudging coefficient."},
     "ep_variant": {"enum": ["positive", "negative", "centered"], "description": "Equilibrium-propagation gradient estimator."},
-    "minimizer_impl": {"const": "custom", "description": "Standalone artifact minimizer implementation."},
+    "minimizer_impl": {"const": "custom", "description": "Archived compatibility selector. The value resolves to model.resistive.minimizer.QuadraticMinimizer; there is no separate custom minimizer module."},
     "mode": {"enum": ["asynchronous", "synchronous", "forward", "backward"], "description": "Layer update ordering; paper presets use asynchronous odd-even updates."},
     "single_diode_updater": {"enum": ["custom", "standard", "overrelaxed"], "description": "Updater selected when non_linearity is single_diode_exponential; otherwise inactive."},
     "double_diode_updater": {"enum": ["float64", "float32", "float64_overrelaxed", "float32_overrelaxed", "overrelaxed", "standard", "custom"], "description": "Double-Shockley updater, or standard/overrelaxed measured-PWL updater when non_linearity is experimental."},

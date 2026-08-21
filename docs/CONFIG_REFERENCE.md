@@ -35,26 +35,30 @@ They do not change the selected updater's computation.
 ## Implementation map
 
 The solver code is included in this repository rather than imported from the
-larger research workspace:
+larger research workspace. Following the original library layout, every
+coordinate updater and the minimizer selector live in the single canonical
+`model/resistive/minimizer.py` module:
 
-- [`_load_lambertw`](../repro/vendor/model/resistive/minimizer.py#L12) selects
+- [`_load_lambertw`](../repro/vendor/model/resistive/minimizer.py#L19) selects
   `torch.special.lambertw` when available and otherwise the pinned
   `torchlambertw` backend.
-- [`Float64ExponentialDoubleDiodeUpdater`](../repro/vendor/labs/custom_minimizer.py#L233)
+- [`Float64ExponentialDoubleDiodeUpdater`](../repro/vendor/model/resistive/minimizer.py#L1055)
   implements the paper's float64 antiparallel double-Shockley update.
-- [`Float32ExponentialDoubleDiodeUpdater`](../repro/vendor/labs/custom_minimizer.py#L348)
+- [`Float32ExponentialDoubleDiodeUpdater`](../repro/vendor/model/resistive/minimizer.py#L1158)
   implements the mixed-precision alternative.
-- [`CustomExponentialSingleDiodeUpdater`](../repro/vendor/labs/custom_minimizer.py#L505)
+- [`ConfigurableExponentialSingleDiodeUpdater`](../repro/vendor/model/resistive/minimizer.py#L1298)
   implements the forward/reverse single-Shockley split.
-- [`ExperimentalIVCurveUpdater`](../repro/vendor/labs/custom_minimizer.py#L751)
+- [`ExperimentalIVCurveUpdater`](../repro/vendor/model/resistive/minimizer.py#L1527)
   implements the measured/PWL damped-Newton solve.
-- [`CustomQuadraticMinimizer`](../repro/vendor/labs/custom_minimizer.py#L874)
+- [`QuadraticMinimizer`](../repro/vendor/model/resistive/minimizer.py#L1645)
   selects the updater from `non_linearity` and the updater-name fields.
-- [`_build_minimizer`](../repro/train.py#L541) passes the checked JSON values
+- [`load_iv_data`](../repro/iv_data.py#L12) keeps measured-I-V file loading at
+  the reproduction boundary rather than coupling it to the model module.
+- [`_build_minimizer`](../repro/train.py#L542) passes the checked JSON values
   into those implementations for training.
 
-The line links identify the initial release implementation. Class and function
-names are the stable navigation points if later edits move the lines.
+Class and function names are the stable navigation points if later edits move
+the linked lines.
 
 ## Lambert W, `z`, and `z_thresh`
 
@@ -75,7 +79,7 @@ z = I_s / (2 a V_t) * exp(s),
 where `a > 0` is the local quadratic coefficient and `s` depends on the linear
 coefficient, diode orientation, `V_t`, and `V_off`. The exact forward,
 reverse, and antiparallel expressions are implemented in
-`repro/vendor/labs/custom_minimizer.py`.
+`repro/vendor/model/resistive/minimizer.py`.
 
 `z_thresh` is an **algorithmic branch threshold**, not a physical diode
 parameter and not a clamp on `z`:
@@ -194,7 +198,7 @@ claim that the fixed-sweep training phases converged to those tolerances.
 
 | Field | Meaning |
 |---|---|
-| `minimizer_impl` | Must be `custom` in this standalone artifact. |
+| `minimizer_impl` | Archived compatibility selector. The value `custom` resolves to the canonical `model.resistive.minimizer.QuadraticMinimizer`; it no longer names a separate module or class. |
 | `mode` | Layer-update ordering. Paper presets use asynchronous odd-even block updates. |
 | `single_diode_updater` | Selects `custom`, `standard`, or `overrelaxed` when the single-Shockley nonlinearity is active. |
 | `double_diode_updater` | Selects float precision/overrelaxation for double Shockley; for measured/PWL it selects `standard` or `overrelaxed`. |
