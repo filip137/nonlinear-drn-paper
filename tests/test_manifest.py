@@ -42,3 +42,16 @@ def test_every_declared_figure_input_exists() -> None:
         for entry in payload[group]:
             for relative in entry["inputs"]:
                 assert (ROOT / relative).is_file(), (entry["path"], relative)
+
+
+def test_scellier_software_and_paper_provenance_is_explicit() -> None:
+    license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    notice_text = (ROOT / "NOTICE").read_text(encoding="utf-8")
+    citation_text = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Copyright (c) 2023 Benjamin Scellier and Maxence Ernoult" in license_text
+    assert "A fast algorithm to simulate nonlinear resistive" in notice_text
+    assert "https://proceedings.mlr.press/v235/scellier24a.html" in notice_text
+    assert "Foundational coordinate-descent formulation" in citation_text
+    assert "Acknowledgments and provenance" in readme_text

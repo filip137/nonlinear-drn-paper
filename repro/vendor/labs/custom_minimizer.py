@@ -9,6 +9,7 @@ are intentionally omitted.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,14 +89,32 @@ class MinimizerSettings:
         self.rel_tol = float(self.rel_tol)
         self.vn_tol = float(self.vn_tol)
         self.use_polish = bool(self.use_polish)
-        self.max_newton_iters = max(int(self.max_newton_iters), 0)
+        self.max_newton_iters = int(self.max_newton_iters)
         self.z_thresh = float(self.z_thresh)
         self.exp_clip = float(self.exp_clip)
         self.experimental_newton_tol = float(self.experimental_newton_tol)
-        if not (self.experimental_newton_tol > 0.0):
+        positive_fields = {
+            "rel_tol": self.rel_tol,
+            "vn_tol": self.vn_tol,
+            "exp_clip": self.exp_clip,
+            "experimental_newton_tol": self.experimental_newton_tol,
+        }
+        for name, value in positive_fields.items():
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    f"Expected {name} to be finite and positive. "
+                    f"Provided value: {value!r}."
+                )
+        if not math.isfinite(self.z_thresh) or self.z_thresh <= 1.0:
             raise ValueError(
-                "Expected experimental_newton_tol > 0. "
-                f"Got {self.experimental_newton_tol!r}."
+                "Expected z_thresh to be finite and greater than 1 for the large-z "
+                "Lambert-W expansion. "
+                f"Provided value: {self.z_thresh!r}."
+            )
+        if self.max_newton_iters < 0:
+            raise ValueError(
+                "Expected max_newton_iters to be non-negative. "
+                f"Provided value: {self.max_newton_iters!r}."
             )
 
 
@@ -746,8 +765,23 @@ class ExperimentalIVCurveUpdater(LayerUpdater):
         super().__init__(layer, fn)
         self._iv_data = iv_data
         self._damping = float(damping)
-        self._max_newton_steps = max(int(max_newton_steps), 1)
-        self._newton_tol = max(float(newton_tol), 1e-12)
+        self._max_newton_steps = int(max_newton_steps)
+        self._newton_tol = float(newton_tol)
+        if not math.isfinite(self._damping) or self._damping <= 0.0:
+            raise ValueError(
+                "Expected damping to be finite and positive. "
+                f"Provided value: {self._damping!r}."
+            )
+        if self._max_newton_steps < 1:
+            raise ValueError(
+                "Expected experimental_newton_max_steps to be at least 1. "
+                f"Provided value: {self._max_newton_steps!r}."
+            )
+        if not math.isfinite(self._newton_tol) or self._newton_tol <= 0.0:
+            raise ValueError(
+                "Expected experimental_newton_tol to be finite and positive. "
+                f"Provided value: {self._newton_tol!r}."
+            )
         extrapolation = os.environ.get("LABS_IV_EXTRAPOLATION", "clamp").strip().lower()
         if extrapolation not in {"clamp", "linear"}:
             extrapolation = "clamp"
@@ -864,6 +898,12 @@ class CustomQuadraticMinimizer(CustomMinimizer):
     ):
         _ = quadratic_diode_param
         exponential_params = dict(exponential_diode_param)
+        overrelaxation_factor = float(overrelaxation_factor)
+        if not math.isfinite(overrelaxation_factor) or overrelaxation_factor <= 0.0:
+            raise ValueError(
+                "Expected overrelaxation_factor to be finite and positive. "
+                f"Provided value: {overrelaxation_factor!r}."
+            )
         non_linearity = _canonical_name(
             non_linearity,
             NONLINEARITY_ALIASES,

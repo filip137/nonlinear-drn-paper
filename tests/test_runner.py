@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import jsonschema
 import pytest
 
 from repro import DRNRunSpec, build_training_config, run_drn
@@ -47,6 +48,10 @@ def test_runner_builds_each_paper_nonlinearity(
     assert config["quadratic_diode_param"]
     assert config["exponential_diode_param"]
     assert config["hard_sigmoid_param"]
+    schema = json.loads(
+        (ROOT / "configs" / "train" / "schema.json").read_text(encoding="utf-8")
+    )
+    jsonschema.validate(config, schema)
 
 
 def test_runner_builds_variable_mnist_architecture_and_layerwise_rates() -> None:

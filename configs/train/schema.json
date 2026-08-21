@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/train/schema.json",
+  "title": "Nonlinear DRN training configuration",
+  "description": "Complete training configuration for the standalone nonlinear-DRN paper artifact. See docs/CONFIG_REFERENCE.md for equations, applicability, and numerical guidance.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor-facing link to this JSON Schema. It is ignored by the training runtime."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable purpose and provenance of this configuration."
+    },
+    "source": {
+      "type": "string",
+      "description": "Optional provenance note identifying the historical runs or assets from which the configuration was audited."
+    },
+    "dataset": {
+      "description": "Dataset selection and preprocessing. MNIST is downloaded only when --download is supplied.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"const": "digits", "description": "Use sklearn's built-in 8x8 Digits dataset."},
+            "num_samples": {"type": ["integer", "null"], "minimum": 2, "description": "Optional deterministic prefix size; null uses all samples."},
+            "train_fraction": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1, "description": "Fraction assigned to the deterministic training split."}
+          },
+          "required": ["name", "num_samples", "train_fraction"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"const": "mnist", "description": "Use torchvision MNIST."},
+            "root": {"type": "string", "minLength": 1, "description": "Repository-relative or absolute MNIST storage directory."},
+            "normalize": {"type": "boolean", "description": "Apply the configured mean, standard deviation, and final scale."},
+            "normalize_mean": {"type": "number", "description": "Mean subtracted before input duplication and input gain."},
+            "normalize_standard_deviation": {"type": "number", "exclusiveMinimum": 0, "description": "Divisor used for standardization."},
+            "normalize_scale": {"type": "number", "exclusiveMinimum": 0, "description": "Multiplier applied after standardization; the paper accuracy runs use 0.3."},
+            "train_samples": {"type": ["integer", "null"], "minimum": 1, "description": "Optional deterministic training subset size."},
+            "test_samples": {"type": ["integer", "null"], "minimum": 1, "description": "Optional deterministic test subset size."}
+          },
+          "required": ["name", "root", "normalize", "normalize_mean", "normalize_standard_deviation", "normalize_scale"]
+        }
+      ]
+    },
+    "layer_shapes": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "integer", "minimum": 1}
+      },
+      "description": "Input, hidden, and output tensor shapes. Inputs are signed-duplicated; double-Shockley and PWL outputs use paired nodes."
+    },
+    "non_linearity": {
+      "enum": ["single_diode_exponential", "double_diode_exponential", "experimental"],
+      "description": "Grounded nonlinear element: one Shockley diode, antiparallel double Shockley diode, or measured/PWL I-V data."
+    },
+    "weight_gains": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "number", "exclusiveMinimum": 0},
+      "description": "One initialization gain per conductance matrix."
+    },
+    "weight_min": {"type": "number", "minimum": 0, "description": "Lower conductance bound enforced after optimizer steps."},
+    "weight_max": {"type": "number", "exclusiveMinimum": 0, "description": "Upper conductance bound enforced after optimizer steps."},
+    "weight_init_mode": {"type": "string", "minLength": 1, "description": "Conductance initialization rule; paper presets use kaiming_uniform."},
+    "input_gain": {"type": "number", "exclusiveMinimum": 0, "description": "Dimensionless multiplier applied after preprocessing and signed input duplication."},
+    "voltage_amp": {"type": "number", "exclusiveMinimum": 0, "description": "Inter-layer voltage-amplifier gain."},
+    "current_amp": {"type": "number", "exclusiveMinimum": 0, "description": "Inter-layer current-amplifier gain."},
+    "quadratic_diode_param": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Explicit finite-conductance/idealized diode parameters retained by the complete schema; inactive for the three paper training nonlinearities.",
+      "properties": {
+        "diode_conductance": {"type": "number", "exclusiveMinimum": 0},
+        "v_min": {"type": "number"},
+        "v_max": {"type": "number"}
+      },
+      "required": ["diode_conductance", "v_min", "v_max"]
+    },
+    "exponential_diode_param": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shockley parameters. Active only for single_diode_exponential and double_diode_exponential.",
+      "properties": {
+        "I_s": {"type": "number", "exclusiveMinimum": 0, "description": "Reverse saturation current in the simulator's electrical units."},
+        "V_t": {"type": "number", "exclusiveMinimum": 0, "description": "Thermal-voltage scale."},
+        "V_off": {"type": "number", "description": "Voltage offset/turn-on shift."}
+      },
+      "required": ["I_s", "V_t", "V_off"]
+    },
+    "hard_sigmoid_param": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Explicit hard-sigmoid compatibility parameters; inactive for the three paper training nonlinearities.",
+      "properties": {
+        "g_on": {"type": "number", "minimum": 0},
+        "g_off": {"type": "number", "minimum": 0},
+        "v_min": {"type": "number"},
+        "v_max": {"type": "number"}
+      },
+      "required": ["g_on", "g_off", "v_min", "v_max"]
+    },
+    "iv_data_path": {"type": "string", "minLength": 1, "description": "Measured/PWL .npz file containing either iv or paired i and v arrays. Active only for experimental."},
+    "batch_size": {"type": "integer", "minimum": 1, "description": "Training mini-batch size."},
+    "num_epochs": {"type": "integer", "minimum": 1, "description": "Number of complete training epochs."},
+    "num_iterations": {"type": "integer", "minimum": 1, "description": "Fixed coordinate-descent sweeps per free or nudged equilibrium because adaptive_equilibrium is false."},
+    "learning_rates": {"type": "array", "minItems": 1, "items": {"type": "number", "minimum": 0}, "description": "Rates in optimizer parameter order: all conductance tensors, followed by hidden biases."},
+    "scheduler_gamma": {"type": "number", "exclusiveMinimum": 0, "description": "Multiplicative learning-rate decay applied after every epoch; 1 disables decay."},
+    "nudging": {"type": "number", "exclusiveMinimum": 0, "description": "Magnitude of the equilibrium-propagation nudging coefficient."},
+    "ep_variant": {"enum": ["positive", "negative", "centered"], "description": "Equilibrium-propagation gradient estimator."},
+    "minimizer_impl": {"const": "custom", "description": "Standalone artifact minimizer implementation."},
+    "mode": {"enum": ["asynchronous", "synchronous", "forward", "backward"], "description": "Layer update ordering; paper presets use asynchronous odd-even updates."},
+    "single_diode_updater": {"enum": ["custom", "standard", "overrelaxed"], "description": "Updater selected when non_linearity is single_diode_exponential; otherwise inactive."},
+    "double_diode_updater": {"enum": ["float64", "float32", "float64_overrelaxed", "float32_overrelaxed", "overrelaxed", "standard", "custom"], "description": "Double-Shockley updater, or standard/overrelaxed measured-PWL updater when non_linearity is experimental."},
+    "overrelaxation_factor": {"type": "number", "exclusiveMinimum": 0, "description": "SOR-style factor omega used only by updater names containing overrelaxed; 1 gives an unrelaxed update."},
+    "adaptive_equilibrium": {"const": false, "description": "Must be false for training. Every phase performs exactly num_iterations sweeps."},
+    "rel_tol": {"type": "number", "exclusiveMinimum": 0, "description": "Relative early-stop tolerance. Retained for compatibility but inactive while adaptive_equilibrium is false."},
+    "vn_tol": {"type": "number", "exclusiveMinimum": 0, "description": "Absolute voltage early-stop tolerance. Retained for compatibility but inactive while adaptive_equilibrium is false."},
+    "use_polish": {"type": "boolean", "description": "Run Newton residual-correction steps after the Lambert-W estimate for custom Shockley updaters."},
+    "max_newton_iters": {"type": "integer", "minimum": 0, "description": "Maximum Shockley Newton-polish iterations; inactive when use_polish is false and always inactive for measured/PWL."},
+    "z_thresh": {"type": "number", "exclusiveMinimum": 1, "description": "Lambert-W branch threshold. Use the backend for z <= z_thresh and a four-term large-z asymptotic expansion above it; this does not clip z."},
+    "exp_clip": {"type": "number", "exclusiveMinimum": 0, "description": "Absolute clamp on exponent arguments used to construct z and, when enabled, Newton residuals. Active only for custom Shockley updaters."},
+    "damping": {"type": "number", "exclusiveMinimum": 0, "description": "Multiplier on measured/PWL Newton steps; active only for experimental."},
+    "experimental_newton_max_steps": {"type": "integer", "minimum": 1, "description": "Maximum measured/PWL Newton steps per coordinate update; active only for experimental."},
+    "experimental_newton_tol": {"type": "number", "exclusiveMinimum": 0, "description": "Absolute voltage-change stopping tolerance for measured/PWL Newton iterations; active only for experimental."},
+    "seed": {"type": "integer", "description": "Random seed for initialization, data split, and loader order."},
+    "expected_results": {"type": "object", "description": "Optional audited outcome metadata; never used as a training input.", "additionalProperties": true},
+    "runner": {"type": "object", "description": "Provenance added to configurations expanded by repro.runner.", "additionalProperties": true}
+  },
+  "required": [
+    "description",
+    "dataset",
+    "layer_shapes",
+    "non_linearity",
+    "weight_gains",
+    "weight_min",
+    "weight_max",
+    "weight_init_mode",
+    "input_gain",
+    "voltage_amp",
+    "current_amp",
+    "quadratic_diode_param",
+    "exponential_diode_param",
+    "hard_sigmoid_param",
+    "batch_size",
+    "num_epochs",
+    "num_iterations",
+    "learning_rates",
+    "scheduler_gamma",
+    "nudging",
+    "ep_variant",
+    "minimizer_impl",
+    "mode",
+    "single_diode_updater",
+    "double_diode_updater",
+    "overrelaxation_factor",
+    "adaptive_equilibrium",
+    "rel_tol",
+    "vn_tol",
+    "use_polish",
+    "max_newton_iters",
+    "z_thresh",
+    "exp_clip",
+    "damping",
+    "experimental_newton_max_steps",
+    "experimental_newton_tol",
+    "seed"
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"non_linearity": {"const": "experimental"}}, "required": ["non_linearity"]},
+      "then": {"required": ["iv_data_path"]}
+    }
+  ]
+}

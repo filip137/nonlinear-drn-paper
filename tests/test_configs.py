@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import jsonschema
 import numpy as np
 import pytest
 import torch
@@ -25,6 +26,39 @@ def test_training_configs_cover_all_paper_nonlinearities() -> None:
         assert config.hard_sigmoid_param
         assert config.adaptive_equilibrium is False
         assert config.scheduler_gamma == 1.0
+
+
+def test_training_configs_declare_documented_json_schema() -> None:
+    schema_path = ROOT / "configs" / "train" / "schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator_class = jsonschema.validators.validator_for(schema)
+    validator_class.check_schema(schema)
+    validator = validator_class(schema)
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["additionalProperties"] is False
+    for field in (
+        "z_thresh",
+        "exp_clip",
+        "use_polish",
+        "max_newton_iters",
+        "damping",
+        "experimental_newton_max_steps",
+        "experimental_newton_tol",
+        "adaptive_equilibrium",
+        "rel_tol",
+        "vn_tol",
+    ):
+        assert field in schema["properties"]
+        assert schema["properties"][field]["description"]
+
+    schema_url = schema["$id"]
+    for path in sorted((ROOT / "configs" / "train").glob("*.json")):
+        if path == schema_path:
+            continue
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        validator.validate(raw)
+        assert raw["$schema"] == schema_url
+        assert set(schema["required"]).issubset(raw)
 
 
 def test_paper_mnist_config_is_the_reported_drn_xs_shape() -> None:
@@ -143,4 +177,48 @@ def test_training_configs_reject_nonpositive_scheduler_gamma(
     candidate.write_text(json.dumps(config), encoding="utf-8")
 
     with pytest.raises(ValueError, match="Expected config 'scheduler_gamma'"):
+        load_training_config(candidate, repo_root=ROOT)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_message"),
+    [
+        ("z_thresh", 1.0, "Expected config 'z_thresh'"),
+        ("z_thresh", float("nan"), "Expected config 'z_thresh'"),
+        ("exp_clip", 0.0, "Expected config 'exp_clip'"),
+        ("max_newton_iters", -1, "Expected config 'max_newton_iters'"),
+        ("damping", 0.0, "Expected config 'damping'"),
+        ("overrelaxation_factor", 0.0, "Expected config 'overrelaxation_factor'"),
+        ("experimental_newton_max_steps", 0, "Expected config 'experimental_newton_max_steps'"),
+        ("experimental_newton_tol", 0.0, "Expected config 'experimental_newton_tol'"),
+    ],
+)
+def test_training_configs_reject_invalid_solver_settings(
+    tmp_path: Path,
+    field: str,
+    value: object,
+    expected_message: str,
+) -> None:
+    source = ROOT / "configs" / "train" / "digits_double_shockley.json"
+    config = json.loads(source.read_text(encoding="utf-8"))
+    config[field] = value
+    candidate = tmp_path / "invalid-solver-setting.json"
+    candidate.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=expected_message):
+        load_training_config(candidate, repo_root=ROOT)
+
+
+@pytest.mark.parametrize("value", ["false", 0, 1])
+def test_training_configs_require_boolean_use_polish(
+    tmp_path: Path,
+    value: object,
+) -> None:
+    source = ROOT / "configs" / "train" / "digits_double_shockley.json"
+    config = json.loads(source.read_text(encoding="utf-8"))
+    config["use_polish"] = value
+    candidate = tmp_path / "invalid-polish-setting.json"
+    candidate.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Expected config 'use_polish' to be a boolean"):
         load_training_config(candidate, repo_root=ROOT)

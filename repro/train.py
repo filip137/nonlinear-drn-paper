@@ -143,6 +143,12 @@ def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig
             "Expected config 'adaptive_equilibrium' to be the boolean false during training. "
             f"Provided value: {adaptive_equilibrium!r}."
         )
+    use_polish = _required(raw, "use_polish")
+    if not isinstance(use_polish, bool):
+        raise ValueError(
+            "Expected config 'use_polish' to be a boolean. "
+            f"Provided value: {use_polish!r}."
+        )
 
     config = TrainingConfig(
         description=str(raw.get("description", "")),
@@ -174,7 +180,7 @@ def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig
         adaptive_equilibrium=adaptive_equilibrium,
         rel_tol=float(_required(raw, "rel_tol")),
         vn_tol=float(_required(raw, "vn_tol")),
-        use_polish=bool(_required(raw, "use_polish")),
+        use_polish=use_polish,
         max_newton_iters=int(_required(raw, "max_newton_iters")),
         z_thresh=float(_required(raw, "z_thresh")),
         exp_clip=float(_required(raw, "exp_clip")),
@@ -669,13 +675,29 @@ def _validate_scalar_fields(cfg: TrainingConfig) -> None:
         "scheduler_gamma": cfg.scheduler_gamma,
         "rel_tol": cfg.rel_tol,
         "vn_tol": cfg.vn_tol,
+        "exp_clip": cfg.exp_clip,
+        "damping": cfg.damping,
+        "overrelaxation_factor": cfg.overrelaxation_factor,
+        "experimental_newton_max_steps": cfg.experimental_newton_max_steps,
         "experimental_newton_tol": cfg.experimental_newton_tol,
     }
     for name, value in positive_fields.items():
-        if value <= 0:
+        if not math.isfinite(float(value)) or value <= 0:
             raise ValueError(
-                f"Expected config '{name}' to be positive. Provided value: {value!r}."
+                f"Expected config '{name}' to be finite and positive. "
+                f"Provided value: {value!r}."
             )
+    if not math.isfinite(cfg.z_thresh) or cfg.z_thresh <= 1.0:
+        raise ValueError(
+            "Expected config 'z_thresh' to be finite and greater than 1 for the "
+            "large-z Lambert-W expansion. "
+            f"Provided value: {cfg.z_thresh!r}."
+        )
+    if cfg.max_newton_iters < 0:
+        raise ValueError(
+            "Expected config 'max_newton_iters' to be non-negative. "
+            f"Provided value: {cfg.max_newton_iters!r}."
+        )
     if cfg.adaptive_equilibrium:
         raise ValueError(
             "Expected config 'adaptive_equilibrium' to be false during training. "

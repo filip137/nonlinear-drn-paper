@@ -75,6 +75,13 @@ The same interface is available as the Python function `repro.run_drn`.
 See [docs/TRAINING_RUNNER.md](docs/TRAINING_RUNNER.md) for Digits, MNIST,
 layerwise-learning-rate, dry-run, and custom-parameter examples.
 
+Every checked training JSON points to an editor-aware schema. See
+[configs/train/README.md](configs/train/README.md) for the available parameter
+sources and [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) for the full
+field reference, including the Lambert-W large-argument threshold,
+exponent-clipping guard, Newton-polish settings, and which values are inactive
+for each nonlinearity.
+
 ## Training
 
 Run a short CPU smoke test for all three nonlinearities:
@@ -127,6 +134,19 @@ python scripts/reproduce.py all --device cuda
 Wall-clock plots always use the bundled measurements because timings are
 machine-dependent. SPICE netlist generation is not part of this minimal
 artifact; the required SPICE state arrays and timing measurements are bundled.
+
+## Acknowledgments and provenance
+
+This repository extends the coordinate-descent formulation and DRN simulation
+framework introduced by Benjamin Scellier in
+[“A fast algorithm to simulate nonlinear resistive networks”](https://proceedings.mlr.press/v235/scellier24a.html),
+ICML 2024, PMLR 235:43477–43503. The original work establishes the fast exact
+coordinate-descent method for ideal-diode networks; this artifact extends that
+framework to the paper's non-ideal Shockley and measured/PWL nonlinearities.
+
+The original MIT copyright for Benjamin Scellier, Maxence Ernoult, and Rain
+Neuromorphics Inc. is retained in [LICENSE](LICENSE). See [NOTICE](NOTICE) for
+the code and scientific provenance statement.
 
 ## Repository map
 
