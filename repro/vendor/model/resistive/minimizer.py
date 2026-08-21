@@ -15,12 +15,12 @@ def _load_lambertw():
     try:
         import torchlambertw.special as tw_special
         return tw_special.lambertw
-    except Exception as e:
-        def _missing_lambertw(*args, **kwargs):
+    except Exception as exc:
+        def _missing_lambertw(*args, _import_error=exc, **kwargs):
             raise ImportError(
                 "Lambertw backend unavailable; install torchlambertw or use a PyTorch build "
                 "with torch.special.lambertw."
-            ) from e
+            ) from _import_error
 
         return _missing_lambertw
 

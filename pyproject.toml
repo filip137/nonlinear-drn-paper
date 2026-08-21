@@ -21,6 +21,7 @@ dependencies = [
   "scipy==1.16.0",
   "sympy==1.13.1",
   "torch==2.5.1",
+  "torchlambertw @ git+https://github.com/gmgeorg/torchlambertw.git@d365cac4d9a3e6074a03709cf865b4896e3f3cd4",
   "torchvision==0.20.1",
 ]
 
