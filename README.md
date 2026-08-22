@@ -1,28 +1,25 @@
 # Nonlinear DRN paper reproducibility artifact
 
-This standalone repository contains the smallest practical set of code and
-data needed to inspect, train, and reproduce the computational results in
+This  repository contains code and
+data needed train and reproduce the results in
 **“Fast simulation of nonlinear deep resistive networks for energy-based
-computation.”** It is deliberately separate from the larger research
-workspace so it can be linked directly from the paper.
+computation.”** 
 
-The artifact supports the three nonlinearities evaluated in the paper:
+It supports the three nonlinearities evaluated in the paper:
 
 - single Shockley diode (`single_diode_exponential`),
 - double Shockley diode (`double_diode_exponential`), and
-- the measured piecewise-linear I–V curve (`experimental` in the code).
+- the piecewise-linear I–V curve (`experimental` in the code).
 
-It provides three levels of reproduction:
+It serves three purposes:
 
-1. **Figures and tables:** regenerate every data-driven paper asset from the
+1. **Reproducing figures and tables:** regenerate every data-driven paper asset from the
    bundled curated inputs; copy the six source schematics into the same output
    tree.
-2. **Numerical replay:** rerun selected Digits checkpoints with coordinate
+2. **Reproduce numerical results:** rerun selected Digits checkpoints with coordinate
    descent and compare node voltages against bundled SPICE reference states.
-3. **Training:** train dense DRNs with equilibrium propagation using any of
-   the three paper nonlinearities. A no-download Digits path is included for
-   smoke tests, together with the exact MNIST double-Shockley configuration
-   used for the paper experiment.
+3. **Training:** train dense DRNs with EqProp using any of
+   the three paper nonlinearities. 
 
 ## Prerequisites
 
@@ -107,20 +104,10 @@ python scripts/train_drn.py \
   --device cpu
 ```
 
-This uses the bundled scikit-learn Digits dataset, so it needs no download.
-With `--hidden-sizes` omitted, the runner inherits the one-hidden-layer anchor
-from the selected parameter source (width 32 for double Shockley). A
-one-hidden-layer Digits run defaults to four coordinate-descent iterations.
-The runner also chooses audited learning-rate, input-gain, electrical, and
-solver defaults from `paper-digits`; the generated configuration and
-checkpoints are written under `outputs/training/runner/`.
-
 ## Define a training run
 
-For exploratory training, `scripts/train_drn.py` follows the compact style of
-the original Scellier fast-DRN examples: specify the dataset, hidden-layer
-sizes, and nonlinearity together, with optional overrides for the learning rate
-and other training parameters.
+For exploratory training, `scripts/train_drn.py` specify the dataset, hidden-layer
+sizes, and nonlinearity.
 
 ```bash
 python scripts/train_drn.py \
@@ -204,9 +191,7 @@ python scripts/reproduce.py train \
 ```
 
 Each run writes `config.resolved.json`, `history.json`, `model.pt`, and
-`run_metadata.json` to `outputs/training/` (or to `--output`). Diode parameter
-dictionaries are mandatory in every configuration; no physical parameters are
-silently invented.
+`run_metadata.json` to `outputs/training/` (or to `--output`).
 
 ## Numerical replay
 
@@ -225,8 +210,8 @@ python scripts/reproduce.py all --device cuda
 ```
 
 Wall-clock plots always use the bundled measurements because timings are
-machine-dependent. SPICE netlist generation is not part of this minimal
-artifact; the required SPICE state arrays and timing measurements are bundled.
+machine-dependent. SPICE netlist generation is not part of this artifact; 
+the required SPICE state arrays and timing measurements are bundled.
 
 ## Acknowledgments and provenance
 
