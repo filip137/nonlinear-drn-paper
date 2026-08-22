@@ -1,4 +1,4 @@
-# Nonlinear DRN paper reproducibility artifact
+# Nonlinear DRN paper
 
 This  repository contains code and
 data needed train and reproduce the results in
