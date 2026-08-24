@@ -1,9 +1,9 @@
 # Nonlinear DRN paper
 
-This  repository contains code and
-data needed train and reproduce the results in
+This repository contains the code and data needed to train models and
+reproduce the results in
 **“Fast simulation of nonlinear deep resistive networks for energy-based
-computation.”** 
+computation.”**
 
 It supports the three nonlinearities evaluated in the paper:
 
@@ -16,10 +16,10 @@ It serves three purposes:
 1. **Reproducing figures and tables:** regenerate every data-driven paper asset from the
    bundled curated inputs; copy the six source schematics into the same output
    tree.
-2. **Reproduce numerical results:** rerun selected Digits checkpoints with coordinate
+2. **Reproducing numerical results:** rerun selected Digits checkpoints with coordinate
    descent and compare node voltages against bundled SPICE reference states.
 3. **Training:** train dense DRNs with EqProp using any of
-   the three paper nonlinearities. 
+   the three paper nonlinearities.
 
 ## Prerequisites
 
@@ -86,6 +86,7 @@ creating output or starting training:
 ```bash
 python scripts/train_drn.py \
   --dataset digits \
+  --hidden-sizes 32 \
   --non-linearity double \
   --parameter-set paper-digits \
   --dry-run
@@ -96,6 +97,7 @@ Then run one training and evaluation batch on CPU:
 ```bash
 python scripts/train_drn.py \
   --dataset digits \
+  --hidden-sizes 32 \
   --non-linearity double \
   --parameter-set paper-digits \
   --epochs 1 \
@@ -104,10 +106,14 @@ python scripts/train_drn.py \
   --device cpu
 ```
 
+`--hidden-sizes` accepts one width per hidden layer. It is explicit above; if
+it is omitted, the runner uses the selected parameter set's audited
+one-hidden-layer anchor (32 for this double-Shockley Digits example).
+
 ## Define a training run
 
-For exploratory training, `scripts/train_drn.py` specify the dataset, hidden-layer
-sizes, and nonlinearity.
+For exploratory training, use `scripts/train_drn.py` to specify the dataset,
+hidden-layer sizes, and nonlinearity.
 
 ```bash
 python scripts/train_drn.py \
@@ -210,7 +216,7 @@ python scripts/reproduce.py all --device cuda
 ```
 
 Wall-clock plots always use the bundled measurements because timings are
-machine-dependent. SPICE netlist generation is not part of this artifact; 
+machine-dependent. SPICE netlist generation is not part of this artifact;
 the required SPICE state arrays and timing measurements are bundled.
 
 ## Acknowledgments and provenance
