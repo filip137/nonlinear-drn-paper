@@ -18,10 +18,12 @@ from model.resistive.network import DeepResistiveEnergy
 from repro.config import RuntimeConfig, load_runtime_config, parse_layer_shapes
 from repro.device import resolve_device
 from repro.iv_data import load_iv_data
-from repro.manifest import ReproJob
+from repro.manifest import PackManifest, ReproJob
 
 
 DEFAULT_NUM_POINTS = 2000
+DEMO_BATCH_SIZE = 256
+DEMO_JOB_ID = "timing/double_diode_exponential/hidden_1/hidden_64"
 warnings.filterwarnings(
     "ignore",
     message=r"You are using `torch.load` with `weights_only=False`.*",
@@ -34,6 +36,21 @@ class ValidationResult:
     run_dir: Path
     states_npz: Path
     metadata_json: Path
+    accuracy: float
+
+
+@dataclass(frozen=True)
+class DemoResult:
+    job_id: str
+    config: str
+    weights: str
+    architecture: tuple[int, ...]
+    non_linearity: str
+    num_iterations: int
+    batch_size: int
+    device: str
+    correct: int
+    total: int
     accuracy: float
 
 
@@ -128,6 +145,68 @@ def run_validation(pack_root: Path, job: ReproJob, *, device: str = "cpu") -> Va
     metadata_json = run_dir / "validation_metadata.json"
     metadata_json.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return ValidationResult(run_dir=run_dir, states_npz=states_npz, metadata_json=metadata_json, accuracy=accuracy)
+
+
+def run_demo(
+    pack_root: Path,
+    manifest: PackManifest,
+    *,
+    device: str = "cpu",
+) -> DemoResult:
+    """Evaluate the bundled pretrained Digits model without writing artifacts."""
+
+    job = _find_demo_job(manifest)
+    cfg = load_runtime_config(
+        job.config_path(pack_root),
+        pack_root=pack_root,
+        num_iterations=job.num_iterations,
+    )
+    _set_seed(cfg.seed)
+    torch_device = resolve_device(device)
+    _, test_loader = _digits_loaders(DEMO_BATCH_SIZE, torch_device, cfg.seed)
+
+    energy_fn, network, free_layers, cost_fn, _, _ = _build_energy_stack(
+        cfg=cfg,
+        weights_path=job.weights_path(pack_root),
+        device=torch_device,
+    )
+    minimizer = _build_minimizer(cfg, energy_fn, free_layers)
+
+    total = 0
+    correct = 0
+    with torch.inference_mode():
+        for x, y, _ in test_loader:
+            network.set_input(x, reset=True)
+            minimizer.compute_equilibrium()
+            cost_fn.set_target(y)
+            errors = cost_fn.error_fn()
+            total += int(errors.numel())
+            correct += int(errors.numel()) - int(errors.sum().item())
+
+    accuracy = correct / total if total else 0.0
+    return DemoResult(
+        job_id=job.job_id,
+        config=job.config,
+        weights=job.weights,
+        architecture=tuple(cfg.dims),
+        non_linearity=cfg.non_linearity,
+        num_iterations=cfg.num_iterations,
+        batch_size=DEMO_BATCH_SIZE,
+        device=str(torch_device),
+        correct=correct,
+        total=total,
+        accuracy=accuracy,
+    )
+
+
+def _find_demo_job(manifest: PackManifest) -> ReproJob:
+    for job in manifest.jobs:
+        if job.job_id == DEMO_JOB_ID:
+            return job
+    raise LookupError(
+        f"Bundled demo job {DEMO_JOB_ID!r} was not found in data/manifest.json; "
+        "restore the repository's versioned data bundle before running the demo."
+    )
 
 
 def _set_seed(seed: int | None) -> None:

@@ -63,3 +63,102 @@ def test_measured_iv_loader_reports_expected_format(tmp_path: Path, monkeypatch)
         match="Expected experimental IV data to contain 'iv' or both 'i' and 'v' arrays",
     ):
         load_iv_data(invalid)
+
+
+def test_measured_iv_loader_rejects_non_npz_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LABS_IV_CURVE_PATH", raising=False)
+    invalid = tmp_path / "curve.npy"
+    np.save(invalid, np.zeros((2, 2)))
+
+    with pytest.raises(ValueError, match=r"use a \.npz file"):
+        load_iv_data(invalid)
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        {
+            "iv": np.array(
+                [[-2.0, 0.0, 3.0], [-1.0, 0.0, 2.0]], dtype=np.float64
+            )
+        },
+        {
+            "i": np.array([-2.0, 0.0, 3.0], dtype=np.float32),
+            "v": np.array([-1.0, 0.0, 2.0], dtype=np.float32),
+        },
+    ],
+    ids=("iv-array", "paired-arrays"),
+)
+def test_measured_iv_loader_accepts_supported_layouts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    contents: dict[str, np.ndarray],
+) -> None:
+    monkeypatch.delenv("LABS_IV_CURVE_PATH", raising=False)
+    curve = tmp_path / "curve.npz"
+    np.savez(curve, **contents)
+
+    loaded = load_iv_data(curve)
+
+    np.testing.assert_allclose(
+        loaded.numpy(),
+        np.array([[-2.0, 0.0, 3.0], [-1.0, 0.0, 2.0]]),
+    )
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [
+        ({"iv": np.zeros((3, 2))}, r"shape \(2, N\)"),
+        (
+            {"i": np.zeros((1, 2)), "v": np.array([0.0, 1.0])},
+            "one-dimensional",
+        ),
+        (
+            {"i": np.array([0.0, 1.0]), "v": np.array([0.0, 1.0, 2.0])},
+            "equal lengths",
+        ),
+        (
+            {"iv": np.array([["0", "1"], ["0", "1"]])},
+            "real numeric values",
+        ),
+        ({"iv": np.array([[0.0], [0.0]])}, "at least two samples"),
+        (
+            {"iv": np.array([[0.0, np.inf], [0.0, 1.0]])},
+            "samples to be finite",
+        ),
+        (
+            {"iv": np.array([[0.0, 1.0, 2.0], [0.0, 0.0, 1.0]])},
+            "voltages to be strictly increasing",
+        ),
+        (
+            {"iv": np.array([[0.0, 2.0, 1.0], [0.0, 1.0, 2.0]])},
+            "currents to be nondecreasing",
+        ),
+    ],
+    ids=(
+        "iv-shape",
+        "paired-dimensionality",
+        "paired-lengths",
+        "nonnumeric",
+        "too-short",
+        "nonfinite",
+        "unordered-voltage",
+        "decreasing-current",
+    ),
+)
+def test_measured_iv_loader_rejects_invalid_curves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    contents: dict[str, np.ndarray],
+    message: str,
+) -> None:
+    monkeypatch.delenv("LABS_IV_CURVE_PATH", raising=False)
+    curve = tmp_path / "invalid-curve.npz"
+    np.savez(curve, **contents)
+
+    with pytest.raises(ValueError, match=message):
+        load_iv_data(curve)

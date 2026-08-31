@@ -71,7 +71,8 @@ class DRNRunSpec:
     weight/bias policy when the depth changes. A scalar learning rate is
     expanded over all dense weights and hidden-layer biases. A sequence must
     contain either one value or exactly ``2H + 1`` values for ``H`` hidden
-    layers.
+    layers. ``iv_data_path`` is valid only for the measured/PWL nonlinearity;
+    when supplied, it replaces the curve from the selected parameter source.
     """
 
     dataset: str
@@ -96,6 +97,7 @@ class DRNRunSpec:
     mnist_root: str = "data/external/mnist"
     mnist_train_samples: int | None = None
     mnist_test_samples: int | None = None
+    iv_data_path: str | Path | None = None
 
 
 def build_training_config(
@@ -108,6 +110,11 @@ def build_training_config(
     root = _resolve_repo_root(repo_root)
     dataset = _canonical_dataset(spec.dataset)
     non_linearity = _canonical_non_linearity(spec.non_linearity)
+    if spec.iv_data_path is not None and non_linearity != "experimental":
+        raise ValueError(
+            "Expected iv_data_path to be used only with the measured/PWL "
+            f"nonlinearity. Provided non_linearity: {spec.non_linearity!r}."
+        )
     source_path, source_label = _resolve_parameter_source(
         root,
         non_linearity,
@@ -164,6 +171,29 @@ def build_training_config(
     _apply_optional_override(config, "voltage_amp", spec.voltage_amp)
     _apply_optional_override(config, "current_amp", spec.current_amp)
     _apply_optional_override(config, "seed", spec.seed, integer=True)
+    iv_data_source: str | None = None
+    if non_linearity == "experimental":
+        configured_iv_path = (
+            spec.iv_data_path
+            if spec.iv_data_path is not None
+            else config.get("iv_data_path")
+        )
+        if not isinstance(configured_iv_path, (str, Path)) or not str(
+            configured_iv_path
+        ).strip():
+            raise ValueError(
+                "Expected the measured/PWL parameter source to define 'iv_data_path' "
+                "or iv_data_path to be supplied by the user. "
+                f"Provided value: {configured_iv_path!r}."
+            )
+        resolved_iv_path = _resolve_input_path(root, configured_iv_path)
+        from repro.iv_data import load_iv_data
+
+        load_iv_data(resolved_iv_path, use_environment_override=False)
+        config["iv_data_path"] = _relative_or_absolute(resolved_iv_path, root)
+        iv_data_source = (
+            "user" if spec.iv_data_path is not None else "parameter-source"
+        )
     config["runner"] = {
         "interface": "repro.runner.DRNRunSpec",
         "parameter_source": source_label,
@@ -177,6 +207,8 @@ def build_training_config(
         "non_linearity_argument": spec.non_linearity,
         "adaptive_equilibrium": False,
     }
+    if iv_data_source is not None:
+        config["runner"]["iv_data_source"] = iv_data_source
 
     _validate_positive("weight_gain", spec.weight_gain)
     for field in (
@@ -188,13 +220,6 @@ def build_training_config(
             raise ValueError(
                 f"Expected parameter source '{field}' to be a non-empty object. "
                 f"Provided value: {config.get(field)!r}."
-            )
-    if non_linearity == "experimental":
-        iv_path = config.get("iv_data_path")
-        if not isinstance(iv_path, str) or not iv_path.strip():
-            raise ValueError(
-                "Expected the measured/PWL parameter source to define 'iv_data_path'. "
-                f"Provided value: {iv_path!r}."
             )
     return config
 
@@ -302,6 +327,15 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Custom JSON supplying explicit diode and solver parameters.",
     )
+    parser.add_argument(
+        "--iv-data-path",
+        type=Path,
+        default=None,
+        help=(
+            "Custom measured I-V .npz curve for pwl/experimental runs. "
+            "Relative paths resolve from the repository root."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument(
@@ -310,7 +344,8 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Coordinate-descent sweeps per phase. For Digits, defaults to 4 "
-            "with one hidden layer and 8 with two hidden layers."
+            "with one hidden layer, 8 with two or three hidden layers, and "
+            "the parameter-source value with four or more."
         ),
     )
     parser.add_argument("--nudging", type=float, default=None)
@@ -376,6 +411,7 @@ def main(argv: Sequence[str] | None = None, *, repo_root: Path | None = None) ->
         mnist_root=args.mnist_root,
         mnist_train_samples=args.mnist_train_samples,
         mnist_test_samples=args.mnist_test_samples,
+        iv_data_path=args.iv_data_path,
     )
     root = _resolve_repo_root(repo_root)
     config = build_training_config(spec, repo_root=root)
@@ -475,8 +511,11 @@ def _resolve_num_iterations(
                 f"Provided value: {value!r}."
             )
         return resolved, "user"
-    if dataset == "digits" and hidden_layer_count in {1, 2}:
-        return 4 * hidden_layer_count, "digits-depth-default"
+    if dataset == "digits":
+        if hidden_layer_count == 1:
+            return 4, "digits-depth-default"
+        if hidden_layer_count in {2, 3}:
+            return 8, "digits-depth-default"
     return int(source_value), "parameter-source"
 
 
@@ -708,6 +747,13 @@ def _resolve_output_dir(
         f"{config['dataset']['name']}_{SHORT_NAMES[non_linearity]}_h{hidden}_{stamp}-{suffix}"
     )
     return root / "outputs" / "training" / "runner" / name
+
+
+def _resolve_input_path(root: Path, value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    return path.resolve()
 
 
 def _run_summary(config: dict[str, Any]) -> str:

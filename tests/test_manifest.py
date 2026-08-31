@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from repro.manifest import PackManifest
+from scripts.update_checksums import versioned_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,13 @@ def test_replay_manifest_shape() -> None:
 
 def test_versioned_artifact_checksums() -> None:
     PackManifest.load(ROOT).verify_checksums(ROOT)
+
+
+def test_checksum_manifest_covers_every_versionable_file() -> None:
+    manifest = PackManifest.load(ROOT)
+    expected = {path.relative_to(ROOT).as_posix() for path in versioned_files()}
+
+    assert set(manifest.checksums) == expected
 
 
 def test_paper_manifest_has_exact_reference_coverage() -> None:

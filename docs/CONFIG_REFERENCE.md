@@ -165,6 +165,18 @@ The measured nonlinearity loads voltage and current samples from
 `iv_data_path`, interpolates each segment linearly, and solves the local
 current-balance equation iteratively.
 
+The `.npz` file must contain either one-dimensional `i` and `v` arrays of equal
+length, or one `iv` array shaped `(2, N)` with current in row 0 and voltage in
+row 1. Both layouts require at least two real numeric, finite samples. Voltage
+must be strictly increasing and current must be nondecreasing; the loader
+rejects invalid ordering rather than sorting or changing the curve. The compact
+runner can replace the source curve with `--iv-data-path PATH` (or
+`DRNRunSpec.iv_data_path`) only when the selected nonlinearity is measured/PWL.
+Relative paths are resolved from the repository root. Paths inside the
+repository are serialized relative to its root, external paths remain
+absolute, and the generated metadata records `runner.iv_data_source` as `user`
+or `parameter-source`.
+
 - `damping` multiplies the Newton step. `1` is a full step; values between zero
   and one damp potentially unstable steps.
 - `experimental_newton_max_steps` caps work per coordinate update.
@@ -183,6 +195,12 @@ Training requires `adaptive_equilibrium=false`. Every free and nudged phase
 therefore performs exactly `num_iterations` coordinate-descent sweeps. This is
 important for reproducing the paper's computational budget and gradient
 estimator.
+
+When `num_iterations` is omitted from the compact runner, Digits uses four
+sweeps for one hidden layer, eight for two or three, and the selected parameter
+source's value for four or more. An explicit value always wins. The checked
+JSON configurations remain literal records and do not apply these runner-only
+depth defaults.
 
 `rel_tol` and `vn_tol` define the adaptive infinity-norm stopping condition
 
@@ -224,7 +242,7 @@ to transfer to arbitrary architectures.
 | `exponential_diode_param.V_t` | Shockley thermal-voltage scale. |
 | `exponential_diode_param.V_off` | Voltage offset or turn-on shift. |
 | `hard_sigmoid_param` | Explicit compatibility parameters for hard-sigmoid models. |
-| `iv_data_path` | Measured/PWL `.npz` source containing `iv`, or both `i` and `v` arrays. |
+| `iv_data_path` | Measured/PWL `.npz` source containing 1-D `i` and `v`, or `(2, N)` `iv` in current-then-voltage order; relative paths resolve from the repository root. |
 
 All three physical parameter dictionaries are mandatory even when inactive.
 This fail-closed contract prevents a configuration from silently acquiring
@@ -250,9 +268,10 @@ effective ordering is documented separately in `docs/MNIST_REPRODUCTION.md`.
 ## Validation and archived configurations
 
 The runtime rejects non-positive tolerances and clip values, `z_thresh <= 1`,
-negative Shockley polish counts, non-positive measured/PWL step limits, and
-training configurations that enable adaptive equilibrium. Error messages state
-the expected format before reporting the provided value.
+negative Shockley polish counts, non-positive measured/PWL step limits,
+malformed or nonmonotone I-V data, and training configurations that enable
+adaptive equilibrium. Error messages state the expected format before
+reporting the provided value.
 
 The JSON files below `data/error_vs_iter/configs/` and
 `data/timing/configs/` are archived numerical-replay records rather than

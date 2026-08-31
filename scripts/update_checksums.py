@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "data" / "manifest.json"
 CHECKSUM_PATH = ROOT / "data" / "checksums.sha256"
-EXCLUDED_PARTS = {".git", ".pytest_cache", "__pycache__", "outputs"}
 EXCLUDED_FILES = {MANIFEST_PATH, CHECKSUM_PATH}
 
 
@@ -24,14 +24,18 @@ def sha256(path: Path) -> str:
 
 
 def versioned_files() -> list[Path]:
-    return [
-        path
-        for path in sorted(ROOT.rglob("*"))
-        if path.is_file()
-        and path not in EXCLUDED_FILES
-        and not EXCLUDED_PARTS.intersection(path.relative_to(ROOT).parts)
-        and path.suffix not in {".pyc", ".pyo"}
+    result = subprocess.run(
+        ("git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    paths = [
+        ROOT / relative.decode("utf-8")
+        for relative in result.stdout.split(b"\0")
+        if relative
     ]
+    return [path for path in sorted(paths) if path not in EXCLUDED_FILES]
 
 
 def main() -> int:

@@ -31,5 +31,16 @@ expanded configuration before launching a run.
 
 For the compact runner, omitting `--hidden-sizes` inherits the selected
 parameter source's architecture. Digits then defaults to four iterations for
-one hidden layer and eight for two hidden layers. Explicit architecture and
-iteration overrides always take precedence over these runner defaults.
+one hidden layer and eight for two or three hidden layers. With four or more it
+retains the parameter source's iteration count. An explicit
+`--num-iterations` always takes precedence.
+
+For a custom measured curve, keep `--non-linearity pwl` and a PWL parameter
+source, then add `--iv-data-path path/to/curve.npz`. This overrides only the
+source's curve. The NPZ must contain equal-length, one-dimensional `i` and `v`
+arrays, or an `iv` array shaped exactly `(2, N)` with current first. At least
+two real numeric, finite samples are required; voltage must be strictly
+increasing and current must be nondecreasing. Relative paths resolve from the
+repository root. See
+[`docs/ADDING_NONLINEARITY.md`](../../docs/ADDING_NONLINEARITY.md) for the full
+sampled-data contract and analytic-extension guide.

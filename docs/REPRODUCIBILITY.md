@@ -56,8 +56,17 @@ configured fixed number of coordinate-descent iterations.
 The three Digits configurations are compact functional examples. Each uses
 one hidden layer and four fixed coordinate-descent iterations. In the compact
 runner, omitting the Digits architecture inherits that one-hidden-layer source
-anchor; omitted iterations resolve to four for one hidden layer and eight for
-two, while explicit overrides take precedence.
+anchor; omitted iterations resolve to four for one hidden layer, eight for two
+or three, and the parameter source's value for four or more. Explicit
+`--num-iterations` values take precedence at every depth.
+
+A custom measured/PWL curve is a new experiment rather than a reproduction of
+the bundled measured-device result. The compact runner accepts it through
+`--iv-data-path`; the generated and resolved configurations retain the chosen
+path and whether it overrode the parameter-source curve. Accepted NPZ files
+contain equal-length 1-D `i`/`v` arrays or current-first `(2, N)` `iv` data
+with at least two real numeric, finite samples, strictly increasing voltage,
+and nondecreasing current.
 
 The MNIST configuration preserves the paper DRN-XS architecture and
 hyperparameters:

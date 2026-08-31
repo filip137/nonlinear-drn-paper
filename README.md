@@ -40,13 +40,14 @@ is downloaded separately, and only when `--download` is supplied.
 
 ## Clone and install
 
+### CPU
+
 ```bash
 git clone https://github.com/filip137/nonlinear-drn-paper.git
 cd nonlinear-drn-paper
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-# CPU environment
 python -m pip install -r requirements.txt
 python scripts/reproduce.py verify
 ```
@@ -61,77 +62,87 @@ with Torchvision 0.20.1 on Python 3.12, and PyTorch 2.6.0 with Torchvision
 0.21.0 on Python 3.13. Use Python 3.12 when reproducing the paper's reference
 numerical results.
 
-For an NVIDIA GPU, install the complete CUDA 12.4 environment instead of the
-CPU requirements, then require CUDA during verification:
+### NVIDIA GPU
+
+Create and activate the same repository-local virtual environment, but install
+the complete CUDA 12.4 requirements instead of `requirements.txt`:
 
 ```bash
 source .venv/bin/activate
-python -c "import sys; print(sys.executable)"
 python -m pip install -r requirements-cuda.txt
 python scripts/reproduce.py verify --device cuda
 ```
 
-The printed interpreter must end in
-`nonlinear-drn-paper/.venv/bin/python`. Do not launch from the Conda `base`
-interpreter: an unrelated PyTorch build there may require a newer CUDA driver
-than the machine provides. The CUDA verification deliberately fails when the
-GPU stack is unavailable; training requested with `--device cuda` never
+Run `python -c "import sys; print(sys.executable)"` if there is any doubt about
+the active environment: the path should end in
+`nonlinear-drn-paper/.venv/bin/python`. CUDA verification fails explicitly when
+the PyTorch build, NVIDIA driver, or device is unavailable; CUDA training never
 silently falls back to CPU.
 
 ## Run a first simulation
 
-First inspect a fully expanded one-hidden-layer Digits experiment without
-creating output or starting training:
+Pass the bundled scikit-learn Digits test split through a trained
+double-Shockley DRN:
 
 ```bash
-python scripts/train_drn.py \
-  --dataset digits \
-  --hidden-sizes 32 \
-  --non-linearity double \
-  --parameter-set paper-digits \
-  --dry-run
+python scripts/reproduce.py demo
 ```
 
-Then run one training and evaluation batch on CPU:
+The demo loads the bundled one-hidden-layer, width-64 checkpoint and its
+audited solver configuration, evaluates all 360 held-out examples, and prints
+the resulting accuracy (95.0% on the supported reference environments). It
+does not train, download data, or create output files.
+
+## Train a model
+
+### Digits
+
+Train the compact double-Shockley anchor on CPU:
 
 ```bash
 python scripts/train_drn.py \
   --dataset digits \
-  --hidden-sizes 32 \
-  --non-linearity double \
-  --parameter-set paper-digits \
-  --epochs 1 \
-  --max-batches 1 \
-  --max-eval-batches 1 \
-  --device cpu
-```
-
-`--hidden-sizes` accepts one width per hidden layer. It is explicit above; if
-it is omitted, the runner uses the selected parameter set's audited
-one-hidden-layer anchor (32 for this double-Shockley Digits example).
-
-## Define a training run
-
-For exploratory training, use `scripts/train_drn.py` to specify the dataset,
-hidden-layer sizes, and nonlinearity.
-
-```bash
-python scripts/train_drn.py \
-  --dataset digits \
-  --hidden-sizes 128 64 \
   --non-linearity double \
   --parameter-set paper-digits \
   --epochs 10 \
   --device cpu
 ```
 
-This explicit architecture has two hidden layers, so an omitted
-`--num-iterations` resolves to eight. Digits uses four iterations for one
-hidden layer and eight for two; explicit `--hidden-sizes` and
-`--num-iterations` values always win.
+Omitting `--hidden-sizes` uses the selected parameter source's audited
+one-hidden-layer anchor (width 32 here). Supply one width per hidden layer to
+change the architecture, for example `--hidden-sizes 128 64`.
 
-Use `--dataset mnist --download` for MNIST, and choose `single`, `double`, or
-`pwl` for the three paper nonlinearities. The selected parameter set supplies
+When `--num-iterations` is omitted, Digits uses four coordinate-descent sweeps
+for one hidden layer and eight for two or three hidden layers. For four or more
+hidden layers, set `--num-iterations` explicitly; otherwise the selected
+parameter source's value is retained. An explicit value always wins.
+
+Add `--max-batches 1 --max-eval-batches 1 --epochs 1` for a quick end-to-end
+training check.
+
+### MNIST
+
+Launch the paper's double-Shockley DRN-XS configuration on CUDA:
+
+```bash
+python scripts/train_drn.py \
+  --dataset mnist \
+  --non-linearity double \
+  --parameter-set paper-mnist-xs \
+  --device cuda \
+  --download \
+  --seed 0
+```
+
+This preset supplies the one-hidden-layer width of 100, 100 epochs, four
+coordinate-descent sweeps, paper learning rates, input gain, and electrical
+parameters. `--download` is required unless MNIST already exists under
+`data/external/mnist/`. See
+[docs/MNIST_REPRODUCTION.md](docs/MNIST_REPRODUCTION.md) for the exact protocol,
+published-aggregate provenance, and seed limitation.
+
+Choose `single`, `double`, or `pwl` for the three paper nonlinearities. The
+selected parameter set supplies
 known-working learning-rate and input-gain defaults; `--learning-rate` and
 `--input-gain` override them. The parameter set is required because it also
 supplies explicit physical diode parameters, which are never silently
@@ -140,7 +151,9 @@ the fully expanded configuration beside its checkpoints.
 
 The same interface is available as the Python function `repro.run_drn`.
 See [docs/TRAINING_RUNNER.md](docs/TRAINING_RUNNER.md) for Digits, MNIST,
-layerwise-learning-rate, dry-run, and custom-parameter examples.
+layerwise-learning-rate, dry-run, and custom-parameter examples. To inspect the
+fully expanded configuration without training or writing files, add
+`--dry-run`.
 
 Every checked training JSON points to an editor-aware schema. See
 [configs/train/README.md](configs/train/README.md) for the available parameter
@@ -148,6 +161,60 @@ sources and [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) for the full
 field reference, including the Lambert-W large-argument threshold,
 exponent-clipping guard, Newton-polish settings, and which values are inactive
 for each nonlinearity.
+
+Run a checked JSON configuration directly, or smoke-test all three paper
+nonlinearities, with:
+
+```bash
+python scripts/reproduce.py train \
+  --config configs/train/digits_double_shockley.json \
+  --device cpu \
+  --epochs 15
+python scripts/reproduce.py train-smoke --device cpu
+```
+
+Training runs write the expanded configuration, history, final and best
+checkpoints, and runtime metadata under `outputs/training/` unless `--output`
+selects another directory.
+
+## Use a custom I–V curve
+
+The measured/PWL model accepts a sampled passive current–voltage curve in an
+NPZ file. The recommended layout uses one-dimensional `i` and `v` arrays:
+
+```python
+import numpy as np
+
+v = np.linspace(-1.5, 1.5, 301)
+i = 1e-3 * v + 2e-3 * v**3
+np.savez("my_curve.npz", i=i, v=v)
+```
+
+Both arrays must contain at least two finite values; voltage must be strictly
+increasing and current must be nondecreasing. An `iv` array shaped `(2, N)` is
+also accepted, with current in the first row and voltage in the second.
+
+Use the curve in the compact runner with:
+
+```bash
+python scripts/train_drn.py \
+  --dataset digits \
+  --non-linearity pwl \
+  --parameter-set paper-digits \
+  --iv-data-path my_curve.npz \
+  --epochs 10 \
+  --device cpu
+```
+
+Here `paper-digits` still supplies the electrical and PWL solver settings; only
+the sampled curve is replaced. Relative curve paths are resolved from the
+repository root. Curves should span the intended operating-voltage range
+because the updater clamps outside the sampled range by default.
+
+For an analytic device law or another coordinate-update rule, see
+[docs/ADDING_NONLINEARITY.md](docs/ADDING_NONLINEARITY.md). It describes the
+energy interaction, coordinate solver, registration, configuration, and tests
+needed to add a new nonlinearity.
 
 ## Reproduce the paper figures
 
@@ -164,40 +231,6 @@ To regenerate only the two MNIST panels, run
 `python scripts/reproduce.py mnist-figures`; the audited gain, learning-rate,
 normalization, and solver provenance is in
 [docs/MNIST_REPRODUCTION.md](docs/MNIST_REPRODUCTION.md).
-
-## Training
-
-Run a short CPU smoke test for all three nonlinearities:
-
-```bash
-python scripts/reproduce.py train-smoke --device cpu
-```
-
-Train one configuration (command-line values override the JSON):
-
-```bash
-python scripts/reproduce.py train \
-  --config configs/train/digits_double_shockley.json \
-  --device cpu \
-  --epochs 15
-```
-
-All three bundled Digits training configurations use one hidden layer and
-four fixed coordinate-descent iterations.
-
-The paper MNIST setup is in
-`configs/train/mnist_paper_double_shockley.json`. MNIST itself is not
-redistributed; allow torchvision to download it explicitly:
-
-```bash
-python scripts/reproduce.py train \
-  --config configs/train/mnist_paper_double_shockley.json \
-  --device cuda \
-  --download
-```
-
-Each run writes `config.resolved.json`, `history.json`, `model.pt`, and
-`run_metadata.json` to `outputs/training/` (or to `--output`).
 
 ## Numerical replay
 

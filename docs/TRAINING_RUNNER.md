@@ -44,8 +44,8 @@ python scripts/train_drn.py \
   --device cpu
 ```
 
-With two hidden layers and no `--num-iterations` override, the runner uses
-eight iterations.
+With two or three hidden layers and no `--num-iterations` override, the runner
+uses eight iterations.
 
 For a quick end-to-end check, add:
 
@@ -123,13 +123,11 @@ selected parameter source when their flags are omitted:
 Architecture is optional for Digits as well. When `--hidden-sizes` is omitted,
 the selected source supplies its one-hidden-layer anchor: width 64 for single
 Shockley and width 32 for double Shockley or measured/PWL. Omitted Digits
-solver iterations depend on the resulting depth: four for one hidden layer and
-eight for two hidden layers. An explicit `--hidden-sizes` or
-`--num-iterations` value takes precedence. The bundled Digits JSON
-configurations all use one hidden layer and four fixed iterations.
-For three or more hidden layers, the runner retains the selected source's
-iteration count; set `--num-iterations` explicitly when exploring those
-depths.
+solver iterations depend on the resulting depth: four for one hidden layer,
+eight for two or three hidden layers, and the parameter source's value for four
+or more. An explicit `--num-iterations` value always takes precedence. The
+bundled Digits JSON configurations all use one hidden layer and four fixed
+iterations.
 
 These are known-working anchors rather than a claim that one rate is optimal
 for every depth and width. On the deterministic Digits split (`seed=0`), the
@@ -218,12 +216,42 @@ print(result.output_dir)
 ```
 
 This inherits the double-Shockley one-hidden-layer width and therefore uses
-four iterations. Set `hidden_sizes=(128, 64)` to define two hidden layers; if
-`num_iterations` remains omitted, that depth uses eight iterations.
+four iterations. Set `hidden_sizes=(128, 64)` or
+`hidden_sizes=(128, 64, 32)` to define two or three hidden layers; if
+`num_iterations` remains omitted, either depth uses eight iterations.
 
 Useful optional fields on `DRNRunSpec` include `nudging`, `input_gain`,
-`learning_rate`, `voltage_amp`, `current_amp`, `weight_gain`,
+`learning_rate`, `iv_data_path`, `voltage_amp`, `current_amp`, `weight_gain`,
 `digits_num_samples`, `mnist_train_samples`, and `mnist_test_samples`.
+
+## Custom measured I-V curves
+
+Select the measured/PWL nonlinearity and pass a custom curve independently of
+the physical and solver parameter source:
+
+```bash
+python scripts/train_drn.py \
+  --dataset digits \
+  --non-linearity pwl \
+  --parameter-set paper-digits \
+  --iv-data-path data/assets/my_curve.npz \
+  --dry-run
+```
+
+The custom file overrides the parameter source's `iv_data_path`; it does not
+replace that source's damping, Newton, amplification, or optimizer settings.
+The NPZ must contain either equal-length, one-dimensional `i` and `v` arrays or
+an `iv` array shaped exactly `(2, N)` in current-then-voltage order. It must
+contain at least two real numeric, finite samples, with strictly increasing
+voltage and nondecreasing current. Relative paths resolve from the repository
+root, and validation also runs during `--dry-run`. Paths inside the repository
+are stored relative to its root; external paths remain absolute. The generated
+runner metadata records `iv_data_source` as `user` or `parameter-source`.
+Supplying `--iv-data-path` with a non-PWL nonlinearity is rejected.
+
+Use `iv_data_path="data/assets/my_curve.npz"` in `DRNRunSpec` for the Python
+interface. See [`ADDING_NONLINEARITY.md`](ADDING_NONLINEARITY.md) for a file
+creation example and for the code path required by a new analytic current law.
 
 ## Physical parameter sources
 
@@ -239,7 +267,8 @@ A custom parameter JSON must have the same complete schema as the examples in
 `configs/train/`, including non-empty `quadratic_diode_param`,
 `exponential_diode_param`, and `hard_sigmoid_param` dictionaries. Its
 `non_linearity` must match the requested run. A measured/PWL source must also
-provide `iv_data_path`. Relative paths are resolved from the repository root.
+provide `iv_data_path`; the compact run's `iv_data_path`/`--iv-data-path` can
+then replace that curve. Relative paths are resolved from the repository root.
 
 For example:
 

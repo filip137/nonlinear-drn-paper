@@ -53,6 +53,11 @@ def parse_args() -> argparse.Namespace:
         "mnist-figures",
         help="Regenerate only the paper's MNIST accuracy and PCA panels.",
     )
+    demo = sub.add_parser(
+        "demo",
+        help="Evaluate the bundled pretrained Digits model without writing artifacts.",
+    )
+    demo.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
 
     train = sub.add_parser("train", help="Train one DRN configuration with equilibrium propagation.")
     train.add_argument("--config", type=Path, required=True)
@@ -174,6 +179,21 @@ def main() -> int:
         outputs = regenerate_mnist_assets(PACK_ROOT)
         for output in outputs:
             print(f"wrote {output.relative_to(PACK_ROOT)}")
+        return 0
+    if args.command == "demo":
+        from repro.digits_validate import run_demo
+
+        result = run_demo(PACK_ROOT, manifest, device=args.device)
+        print(f"demo_job: {result.job_id}")
+        print(f"config: {result.config}")
+        print(f"weights: {result.weights}")
+        print(f"architecture: {' -> '.join(str(width) for width in result.architecture)}")
+        print(f"nonlinearity: {result.non_linearity}")
+        print(f"iterations: {result.num_iterations}")
+        print(f"inference_batch_size: {result.batch_size}")
+        print(f"device: {result.device}")
+        print(f"correct: {result.correct}/{result.total}")
+        print(f"accuracy: {100.0 * result.accuracy:.2f}%")
         return 0
     if args.command == "train":
         from repro.train import run_training

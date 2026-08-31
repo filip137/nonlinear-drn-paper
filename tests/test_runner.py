@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import jsonschema
+import numpy as np
 import pytest
 
 from repro import DRNRunSpec, build_training_config, run_drn
@@ -84,6 +86,32 @@ def test_runner_inherits_one_hidden_layer_digits_anchors(
     assert config["runner"]["hidden_sizes"] == [expected_hidden_width]
     assert config["runner"]["hidden_sizes_source"] == "parameter-source"
     assert config["runner"]["num_iterations_source"] == "digits-depth-default"
+
+
+@pytest.mark.parametrize(
+    ("hidden_sizes", "expected_iterations", "expected_source"),
+    [
+        ((64, 32, 16), 8, "digits-depth-default"),
+        ((64, 32, 16, 8), 4, "parameter-source"),
+    ],
+)
+def test_runner_resolves_three_and_four_layer_digits_iteration_defaults(
+    hidden_sizes: tuple[int, ...],
+    expected_iterations: int,
+    expected_source: str,
+) -> None:
+    config = build_training_config(
+        DRNRunSpec(
+            dataset="digits",
+            hidden_sizes=hidden_sizes,
+            non_linearity="double",
+            parameter_set="paper-digits",
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["num_iterations"] == expected_iterations
+    assert config["runner"]["num_iterations_source"] == expected_source
 
 
 def test_runner_builds_variable_mnist_architecture_and_layerwise_rates() -> None:
@@ -221,6 +249,115 @@ def test_runner_requires_explicit_physical_parameter_source() -> None:
                 learning_rate=0.01,
                 non_linearity="double",
             ),
+            repo_root=ROOT,
+        )
+
+
+def test_runner_custom_iv_curve_overrides_parameter_source_and_resolves_from_root(
+    tmp_path: Path,
+) -> None:
+    curve = tmp_path / "custom-curve.npz"
+    np.savez(
+        curve,
+        i=np.array([-1.0, 0.0, 2.0]),
+        v=np.array([-0.5, 0.0, 0.5]),
+    )
+    relative_curve = Path(os.path.relpath(curve, ROOT))
+
+    config = build_training_config(
+        DRNRunSpec(
+            dataset="digits",
+            non_linearity="pwl",
+            parameter_set="paper-digits",
+            iv_data_path=relative_curve,
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["iv_data_path"] == str(curve.resolve())
+    assert config["runner"]["iv_data_source"] == "user"
+    assert config["runner"]["parameter_source"].startswith(
+        "parameter-set:paper-digits"
+    )
+
+
+def test_runner_records_parameter_source_for_bundled_iv_curve() -> None:
+    config = build_training_config(
+        DRNRunSpec(
+            dataset="digits",
+            non_linearity="experimental",
+            parameter_set="paper-digits",
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["iv_data_path"] == (
+        "data/assets/experimental_curve_voff_0.8_200_points.npz"
+    )
+    assert config["runner"]["iv_data_source"] == "parameter-source"
+
+
+def test_runner_rejects_iv_curve_for_analytic_nonlinearity(tmp_path: Path) -> None:
+    curve = tmp_path / "curve.npz"
+    np.savez(curve, iv=np.array([[0.0, 1.0], [0.0, 1.0]]))
+
+    with pytest.raises(ValueError, match="only with the measured/PWL nonlinearity"):
+        build_training_config(
+            DRNRunSpec(
+                dataset="digits",
+                non_linearity="double",
+                parameter_set="paper-digits",
+                iv_data_path=curve,
+            ),
+            repo_root=ROOT,
+        )
+
+
+def test_runner_dry_run_validates_and_prints_custom_iv_curve(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    curve = tmp_path / "custom-curve.npz"
+    np.savez(curve, iv=np.array([[0.0, 1.0], [0.0, 1.0]]))
+
+    status = main(
+        [
+            "--dataset",
+            "digits",
+            "--non-linearity",
+            "pwl",
+            "--parameter-set",
+            "paper-digits",
+            "--iv-data-path",
+            str(curve),
+            "--dry-run",
+        ],
+        repo_root=ROOT,
+    )
+    printed = json.loads(capsys.readouterr().out)
+
+    assert status == 0
+    assert printed["iv_data_path"] == str(curve.resolve())
+    assert printed["runner"]["iv_data_source"] == "user"
+
+
+def test_runner_dry_run_rejects_malformed_custom_iv_curve(tmp_path: Path) -> None:
+    curve = tmp_path / "invalid-curve.npz"
+    np.savez(curve, iv=np.array([[0.0, 1.0], [1.0, 0.0]]))
+
+    with pytest.raises(ValueError, match="voltages to be strictly increasing"):
+        main(
+            [
+                "--dataset",
+                "digits",
+                "--non-linearity",
+                "pwl",
+                "--parameter-set",
+                "paper-digits",
+                "--iv-data-path",
+                str(curve),
+                "--dry-run",
+            ],
             repo_root=ROOT,
         )
 
