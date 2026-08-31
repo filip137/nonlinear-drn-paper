@@ -120,6 +120,12 @@ parameter source's value is retained. An explicit value always wins.
 Add `--max-batches 1 --max-eval-batches 1 --epochs 1` for a quick end-to-end
 training check.
 
+While training, an interactive terminal refreshes one progress line after every
+training and evaluation batch with the running loss, running accuracy, and
+elapsed time. Redirected output reports the same metrics at roughly 10%
+intervals so log files stay compact. The complete summary is still printed at
+the end of every epoch.
+
 ### MNIST
 
 Launch the paper's double-Shockley DRN-XS configuration on CUDA:
@@ -141,6 +147,28 @@ parameters. `--download` is required unless MNIST already exists under
 [docs/MNIST_REPRODUCTION.md](docs/MNIST_REPRODUCTION.md) for the exact protocol,
 published-aggregate provenance, and seed limitation.
 
+For a single-Shockley MNIST experiment, start from the bundled default instead:
+
+```bash
+python scripts/train_drn.py \
+  --dataset mnist \
+  --non-linearity single \
+  --parameter-set default \
+  --device cuda \
+  --download \
+  --seed 0
+```
+
+`default` is nonlinearity-aware: it selects
+`configs/train/default_single_shockley.json` for `single`,
+`default_double_shockley.json` for `double`, and `default_custom_iv.json` for
+`pwl`. These parameter sources can be used with either Digits or MNIST, but
+their values are validated Digits-derived starting points. The command above
+therefore defines a new MNIST experiment, not a paper-MNIST configuration or
+result. The paper-MNIST parameter set supports only `double`, which is why
+combining `--parameter-set paper-mnist-xs` with `--non-linearity single` is
+rejected.
+
 Choose `single`, `double`, or `pwl` for the three paper nonlinearities. The
 selected parameter set supplies
 known-working learning-rate and input-gain defaults; `--learning-rate` and
@@ -148,6 +176,28 @@ known-working learning-rate and input-gain defaults; `--learning-rate` and
 supplies explicit physical diode parameters, which are never silently
 invented. Adaptive equilibrium is disabled during training. Every run saves
 the fully expanded configuration beside its checkpoints.
+
+To change a default's physical or solver settings, copy the matching template
+to the git-ignored `configs/local/` directory, edit the copy, and select it with
+`--parameter-config`:
+
+```bash
+mkdir -p configs/local
+cp configs/train/default_single_shockley.json \
+  configs/local/mnist_single.json
+# Edit configs/local/mnist_single.json, then run:
+python scripts/train_drn.py \
+  --dataset mnist \
+  --non-linearity single \
+  --parameter-config configs/local/mnist_single.json \
+  --device cuda \
+  --download \
+  --seed 0
+```
+
+Use either `--parameter-set` or `--parameter-config`, never both. For a custom
+measured/PWL template, set `iv_data_path` in the copied JSON or override it at
+the command line with `--iv-data-path`.
 
 The same interface is available as the Python function `repro.run_drn`.
 See [docs/TRAINING_RUNNER.md](docs/TRAINING_RUNNER.md) for Digits, MNIST,

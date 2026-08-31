@@ -5,10 +5,11 @@ import json
 import math
 import platform
 import random
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import numpy as np
 import torch
@@ -80,6 +81,70 @@ class TrainingResult:
     best_checkpoint: Path
     history_path: Path
     history: dict[str, list[float]]
+
+
+class _LiveProgress:
+    """Render running metrics in place on terminals and periodically in logs."""
+
+    def __init__(
+        self,
+        phase: str,
+        epoch: int,
+        num_epochs: int,
+        total_batches: int,
+        *,
+        stream: TextIO | None = None,
+        interactive: bool | None = None,
+    ) -> None:
+        self.phase = phase
+        self.epoch = int(epoch)
+        self.num_epochs = int(num_epochs)
+        self.total_batches = int(total_batches)
+        self.stream = sys.stdout if stream is None else stream
+        self.interactive = (
+            bool(self.stream.isatty()) if interactive is None else bool(interactive)
+        )
+        self.log_interval = max(1, math.ceil(max(self.total_batches, 1) / 10))
+        self.started_at = time.perf_counter()
+        self.last_width = 0
+        self.started = False
+
+    def start(self) -> None:
+        self.started_at = time.perf_counter()
+        self.started = True
+        self._write(
+            f"{self.phase} epoch={self.epoch}/{self.num_epochs} "
+            f"batches={self.total_batches} starting"
+        )
+
+    def update(self, batch: int, *, running_loss: float, running_accuracy: float) -> None:
+        batch = int(batch)
+        if (
+            not self.interactive
+            and batch != 1
+            and batch != self.total_batches
+            and batch % self.log_interval != 0
+        ):
+            return
+        elapsed = time.perf_counter() - self.started_at
+        self._write(
+            f"{self.phase} epoch={self.epoch}/{self.num_epochs} "
+            f"batch={batch}/{self.total_batches} loss={running_loss:.6g} "
+            f"accuracy={running_accuracy:.2%} elapsed={elapsed:.1f}s"
+        )
+
+    def close(self) -> None:
+        if self.interactive and self.started:
+            print(file=self.stream, flush=True)
+        self.started = False
+
+    def _write(self, message: str) -> None:
+        if self.interactive:
+            rendered = message.ljust(self.last_width)
+            print(f"\r{rendered}", end="", file=self.stream, flush=True)
+            self.last_width = max(self.last_width, len(message))
+        else:
+            print(message, file=self.stream, flush=True)
 
 
 def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig, dict[str, Any]]:
@@ -317,6 +382,12 @@ def run_training(
     start = time.perf_counter()
 
     for epoch in range(resolved_epochs):
+        train_progress = _LiveProgress(
+            "train",
+            epoch + 1,
+            resolved_epochs,
+            _effective_batch_count(train_loader, max_batches),
+        )
         train_loss, train_accuracy = _train_epoch(
             network,
             cost_fn,
@@ -326,16 +397,24 @@ def run_training(
             inference_minimizer,
             train_loader,
             max_batches=max_batches,
+            progress=train_progress,
         )
         # Match the paper loop: epoch 1 uses the configured rates, then rates
         # are decayed before epoch 2 begins.
         scheduler.step()
+        eval_progress = _LiveProgress(
+            "eval",
+            epoch + 1,
+            resolved_epochs,
+            _effective_batch_count(test_loader, max_eval_batches),
+        )
         test_loss, test_accuracy = _evaluate(
             network,
             cost_fn,
             inference_minimizer,
             test_loader,
             max_batches=max_eval_batches,
+            progress=eval_progress,
         )
         history["train_loss"].append(train_loss)
         history["train_accuracy"].append(train_accuracy)
@@ -587,43 +666,53 @@ def _train_epoch(
     loader,
     *,
     max_batches: int | None,
+    progress: _LiveProgress,
 ) -> tuple[float, float]:
     loss_sum = 0.0
     correct = 0
     seen = 0
-    for batch_index, (inputs, labels) in enumerate(loader):
-        if max_batches is not None and batch_index >= max_batches:
-            break
-        inputs = inputs.to(network._function._device)
-        labels = labels.to(network._function._device)
-        optimizer.zero_grad(set_to_none=True)
-        network.set_input(inputs, reset=True)
-        _validate_input_state(network, inputs)
-        inference_minimizer.compute_equilibrium()
-        cost_fn.set_target(labels)
-        batch_loss = float(cost_fn.eval().mean().item())
-        errors = cost_fn.error_fn()
-        batch_size = int(labels.numel())
-        loss_sum += batch_loss * batch_size
-        correct += batch_size - int(errors.sum().item())
-        seen += batch_size
+    progress.start()
+    try:
+        for batch_index, (inputs, labels) in enumerate(loader):
+            if max_batches is not None and batch_index >= max_batches:
+                break
+            inputs = inputs.to(network._function._device)
+            labels = labels.to(network._function._device)
+            optimizer.zero_grad(set_to_none=True)
+            network.set_input(inputs, reset=True)
+            _validate_input_state(network, inputs)
+            inference_minimizer.compute_equilibrium()
+            cost_fn.set_target(labels)
+            batch_loss = float(cost_fn.eval().mean().item())
+            errors = cost_fn.error_fn()
+            batch_size = int(labels.numel())
+            loss_sum += batch_loss * batch_size
+            correct += batch_size - int(errors.sum().item())
+            seen += batch_size
 
-        gradients = estimator.compute_gradient()
-        if len(gradients) < len(params):
-            raise RuntimeError(
-                f"Expected at least {len(params)} parameter gradients. "
-                f"Provided value: {len(gradients)}."
-            )
-        for param, gradient in zip(params, gradients):
-            if not torch.isfinite(gradient).all():
-                raise FloatingPointError(
-                    "Expected every equilibrium-propagation gradient to be finite. "
-                    f"Provided value: parameter={param.name!r}."
+            gradients = estimator.compute_gradient()
+            if len(gradients) < len(params):
+                raise RuntimeError(
+                    f"Expected at least {len(params)} parameter gradients. "
+                    f"Provided value: {len(gradients)}."
                 )
-            param.state.grad = gradient.detach()
-        optimizer.step()
-        for param in params:
-            param.clamp_()
+            for param, gradient in zip(params, gradients):
+                if not torch.isfinite(gradient).all():
+                    raise FloatingPointError(
+                        "Expected every equilibrium-propagation gradient to be finite. "
+                        f"Provided value: parameter={param.name!r}."
+                    )
+                param.state.grad = gradient.detach()
+            optimizer.step()
+            for param in params:
+                param.clamp_()
+            progress.update(
+                batch_index + 1,
+                running_loss=loss_sum / seen,
+                running_accuracy=correct / seen,
+            )
+    finally:
+        progress.close()
 
     if seen == 0:
         raise ValueError(
@@ -633,29 +722,53 @@ def _train_epoch(
     return loss_sum / seen, correct / seen
 
 
-def _evaluate(network, cost_fn, minimizer, loader, *, max_batches: int | None) -> tuple[float, float]:
+def _evaluate(
+    network,
+    cost_fn,
+    minimizer,
+    loader,
+    *,
+    max_batches: int | None,
+    progress: _LiveProgress,
+) -> tuple[float, float]:
     loss_sum = 0.0
     correct = 0
     seen = 0
-    for batch_index, (inputs, labels) in enumerate(loader):
-        if max_batches is not None and batch_index >= max_batches:
-            break
-        inputs = inputs.to(network._function._device)
-        labels = labels.to(network._function._device)
-        network.set_input(inputs, reset=True)
-        _validate_input_state(network, inputs)
-        minimizer.compute_equilibrium()
-        cost_fn.set_target(labels)
-        batch_size = int(labels.numel())
-        loss_sum += float(cost_fn.eval().mean().item()) * batch_size
-        correct += batch_size - int(cost_fn.error_fn().sum().item())
-        seen += batch_size
+    progress.start()
+    try:
+        for batch_index, (inputs, labels) in enumerate(loader):
+            if max_batches is not None and batch_index >= max_batches:
+                break
+            inputs = inputs.to(network._function._device)
+            labels = labels.to(network._function._device)
+            network.set_input(inputs, reset=True)
+            _validate_input_state(network, inputs)
+            minimizer.compute_equilibrium()
+            cost_fn.set_target(labels)
+            batch_size = int(labels.numel())
+            loss_sum += float(cost_fn.eval().mean().item()) * batch_size
+            correct += batch_size - int(cost_fn.error_fn().sum().item())
+            seen += batch_size
+            progress.update(
+                batch_index + 1,
+                running_loss=loss_sum / seen,
+                running_accuracy=correct / seen,
+            )
+    finally:
+        progress.close()
     if seen == 0:
         raise ValueError(
             "Expected at least one evaluation batch after applying max_eval_batches. "
             f"Provided value: max_eval_batches={max_batches!r}."
         )
     return loss_sum / seen, correct / seen
+
+
+def _effective_batch_count(loader, max_batches: int | None) -> int:
+    available = len(loader)
+    if max_batches is None:
+        return available
+    return min(available, max(0, int(max_batches)))
 
 
 def _validate_input_state(network, raw_inputs: torch.Tensor) -> None:

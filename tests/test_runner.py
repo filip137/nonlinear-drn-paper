@@ -89,6 +89,55 @@ def test_runner_inherits_one_hidden_layer_digits_anchors(
 
 
 @pytest.mark.parametrize(
+    ("name", "expected_hidden_width", "output_width"),
+    [
+        ("single", 64, 10),
+        ("double", 32, 20),
+        ("pwl", 32, 20),
+    ],
+)
+def test_default_parameter_set_supports_every_nonlinearity_on_mnist(
+    name: str,
+    expected_hidden_width: int,
+    output_width: int,
+) -> None:
+    config = build_training_config(
+        DRNRunSpec(
+            dataset="mnist",
+            non_linearity=name,
+            parameter_set="default",
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["dataset"]["name"] == "mnist"
+    assert config["layer_shapes"] == [
+        [2, 28, 28],
+        [expected_hidden_width],
+        [output_width],
+    ]
+    assert config["runner"]["parameter_source"].startswith("parameter-set:default")
+
+
+def test_incompatible_paper_parameter_set_lists_working_alternatives() -> None:
+    with pytest.raises(ValueError) as caught:
+        build_training_config(
+            DRNRunSpec(
+                dataset="mnist",
+                non_linearity="single",
+                parameter_set="paper-mnist-xs",
+            ),
+            repo_root=ROOT,
+        )
+
+    message = str(caught.value)
+    assert "Compatible bundled parameter sets" in message
+    assert "default" in message
+    assert "paper-digits" in message
+    assert "new experiment, not a paper reproduction" in message
+
+
+@pytest.mark.parametrize(
     ("hidden_sizes", "expected_iterations", "expected_source"),
     [
         ((64, 32, 16), 8, "digits-depth-default"),

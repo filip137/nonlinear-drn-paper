@@ -53,6 +53,12 @@ For a quick end-to-end check, add:
 --epochs 1 --max-batches 1 --max-eval-batches 1
 ```
 
+During a run, an interactive terminal refreshes one line after every training
+and evaluation batch with the running loss, running accuracy, and elapsed time.
+When output is redirected to a file, progress is printed at roughly 10%
+intervals instead, followed by the usual complete summary at the end of each
+epoch.
+
 ### MNIST
 
 The exact paper DRN-XS electrical and solver parameters are available for the
@@ -77,23 +83,22 @@ python scripts/train_drn.py \
 `data/external/mnist/` (or the directory supplied through `--mnist-root`).
 
 Single-Shockley and measured/PWL models can also be trained on MNIST. Their
-paper measurements were made in the Digits experiments, so select those
-electrical and updater settings explicitly:
+bundled defaults are validated from Digits experiments. For example, launch a
+single-Shockley MNIST experiment with:
 
 ```bash
 python scripts/train_drn.py \
   --dataset mnist \
-  --hidden-sizes 256 128 \
-  --learning-rate 0.01 \
-  --non-linearity pwl \
-  --parameter-set paper-digits \
-  --epochs 20 \
+  --non-linearity single \
+  --parameter-set default \
   --device cuda \
-  --download
+  --download \
+  --seed 0
 ```
 
-This is a new MNIST experiment, not a claimed paper configuration. The output
-configuration records that its physical parameter source is `paper-digits`.
+This is a new MNIST experiment, not a claimed paper configuration or result.
+`--parameter-set paper-mnist-xs` cannot be substituted here: that audited set
+supports only the double-Shockley nonlinearity.
 
 ### Nonlinearity names
 
@@ -113,11 +118,23 @@ even because each layer is divided into forward- and reverse-oriented nodes.
 Learning rate and input gain are optional. They come from the explicitly
 selected parameter source when their flags are omitted:
 
+`--parameter-set default` resolves by nonlinearity rather than by dataset:
+
+| Nonlinearity | Resolved source |
+|---|---|
+| single Shockley | `configs/train/default_single_shockley.json` |
+| double Shockley | `configs/train/default_double_shockley.json` |
+| measured/PWL | `configs/train/default_custom_iv.json` |
+
+All three can be used with either Digits or MNIST. Their values are validated
+Digits-derived starting points, not newly reported paper-MNIST settings. The
+learning-rate, input-gain, and architecture anchors are:
+
 | Parameter set | Nonlinearity | Default learning rate | Default input gain | Anchor |
 |---|---|---:|---:|---|
-| `paper-digits` | single Shockley | 0.005 for weights; 0 for bias | 10 | Digits, one hidden layer of width 64 |
-| `paper-digits` | double Shockley | 0.01 | 10 | Digits, one hidden layer of width 32 |
-| `paper-digits` | measured/PWL | 0.01 | 10 | Digits, one hidden layer of width 32 |
+| `default` or `paper-digits` | single Shockley | 0.005 for weights; 0 for bias | 10 | Digits, one hidden layer of width 64 |
+| `default` or `paper-digits` | double Shockley | 0.01 | 10 | Digits, one hidden layer of width 32 |
+| `default` or `paper-digits` | measured/PWL | 0.01 | 10 | Digits, one hidden layer of width 32 |
 | `paper-mnist-xs` | double Shockley | 0.15 / 0.08 / 0.05 (weight / weight / bias) | 50 | MNIST accuracy-panel DRN-XS, one hidden layer of width 100 |
 
 Architecture is optional for Digits as well. When `--hidden-sizes` is omitted,
@@ -257,10 +274,13 @@ creation example and for the code path required by a new analytic current law.
 
 The runner requires exactly one explicit source:
 
+- `parameter_set="default"` selects the matching single-Shockley,
+  double-Shockley, or measured/PWL default template. These are reusable
+  Digits-derived starting points for either supported dataset.
 - `parameter_set="paper-digits"` supports all three nonlinearities and uses
   the physical and updater settings of the bundled Digits configurations.
 - `parameter_set="paper-mnist-xs"` preserves the reported MNIST DRN-XS
-  double-Shockley accuracy-run settings.
+  double-Shockley accuracy-run settings and supports no other nonlinearity.
 - `parameter_config="path/to/config.json"` loads a custom source.
 
 A custom parameter JSON must have the same complete schema as the examples in
@@ -269,6 +289,32 @@ A custom parameter JSON must have the same complete schema as the examples in
 `non_linearity` must match the requested run. A measured/PWL source must also
 provide `iv_data_path`; the compact run's `iv_data_path`/`--iv-data-path` can
 then replace that curve. Relative paths are resolved from the repository root.
+
+### Edit a default template
+
+Keep the bundled templates unchanged. Copy the one matching the requested
+nonlinearity into the git-ignored `configs/local/` directory and edit that
+copy. For example:
+
+```bash
+mkdir -p configs/local
+cp configs/train/default_single_shockley.json \
+  configs/local/my_single_shockley.json
+# Edit configs/local/my_single_shockley.json, then run:
+python scripts/train_drn.py \
+  --dataset mnist \
+  --non-linearity single \
+  --parameter-config configs/local/my_single_shockley.json \
+  --device cuda \
+  --download
+```
+
+Equivalent starting copies for the other nonlinearities are
+`default_double_shockley.json` and `default_custom_iv.json`. A copied source's
+`non_linearity` must continue to match the requested run. In the custom-I-V
+copy, change the JSON field `iv_data_path`, or pass `--iv-data-path PATH` to
+override it for one run. `--parameter-config` and `--parameter-set` are
+mutually exclusive.
 
 For example:
 

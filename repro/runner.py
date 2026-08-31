@@ -42,6 +42,11 @@ NONLINEARITY_ALIASES = {
 # A parameter set is an explicit choice: it supplies the physical diode
 # dictionaries and nonlinear-solver settings.  It is never selected silently.
 PARAMETER_SETS: dict[str, dict[str, str]] = {
+    "default": {
+        "single_diode_exponential": "configs/train/default_single_shockley.json",
+        "double_diode_exponential": "configs/train/default_double_shockley.json",
+        "experimental": "configs/train/default_custom_iv.json",
+    },
     "paper-digits": {
         "single_diode_exponential": "configs/train/digits_single_shockley.json",
         "double_diode_exponential": "configs/train/digits_double_shockley.json",
@@ -320,7 +325,11 @@ def create_parser() -> argparse.ArgumentParser:
     source.add_argument(
         "--parameter-set",
         choices=tuple(sorted(PARAMETER_SETS)),
-        help="Explicit bundled physical/solver parameter set.",
+        help=(
+            "Explicit bundled physical/solver parameter set. 'default' supports "
+            "single, double, and pwl on either dataset; paper presets retain "
+            "their audited scope."
+        ),
     )
     source.add_argument(
         "--parameter-config",
@@ -541,10 +550,18 @@ def _resolve_parameter_source(
             )
         choices = PARAMETER_SETS[parameter_set]
         if non_linearity not in choices:
+            compatible_sets = tuple(
+                name
+                for name, supported in PARAMETER_SETS.items()
+                if non_linearity in supported
+            )
             raise ValueError(
                 f"Expected parameter_set {parameter_set!r} to support {non_linearity!r}; "
                 f"supported nonlinearities are {tuple(choices)}. "
-                f"Provided value: {non_linearity!r}."
+                f"Provided value: {non_linearity!r}. Compatible bundled parameter "
+                f"sets are {compatible_sets}; use one of them with any dataset, or "
+                "supply --parameter-config. A cross-dataset combination is a new "
+                "experiment, not a paper reproduction."
             )
         relative = choices[non_linearity]
         path = root / relative

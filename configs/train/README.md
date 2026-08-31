@@ -1,15 +1,60 @@
 # Training configurations
 
-The JSON files in this directory are ready-to-run, checked parameter sources
-for the three paper nonlinearities. They share the editor-aware
-[`schema.json`](schema.json). Editors that understand JSON Schema display a
-field's definition and allowed values when hovering over it.
+The JSON files in this directory include reusable starting-point templates and
+the checked parameter sources used for paper reproduction. They share the
+editor-aware [`schema.json`](schema.json). Editors that understand JSON Schema
+display a field's definition and allowed values when hovering over it.
 
 For equations, units, numerical tradeoffs, field applicability, and guidance
 for changing solver values, read
 [`docs/CONFIG_REFERENCE.md`](../../docs/CONFIG_REFERENCE.md).
 
-## Bundled parameter sources
+## Default starting points
+
+The compact runner's `--parameter-set default` selects a template from the
+requested nonlinearity:
+
+| CLI nonlinearity | Template | Validated starting point |
+|---|---|---|
+| `single` | `default_single_shockley.json` | Digits, one hidden layer of width 64 |
+| `double` | `default_double_shockley.json` | Digits, one hidden layer of width 32 |
+| `pwl` | `default_custom_iv.json` | Digits, one hidden layer of width 32 |
+
+The runner can use each template with either Digits or MNIST. Their values are
+validated Digits-derived starting points; using one with MNIST defines a new
+experiment and is not a paper-MNIST claim.
+
+Do not edit a bundled template in place. Copy the matching file into the
+git-ignored `configs/local/` directory, edit that copy, and pass it through
+`--parameter-config`. For example:
+
+```bash
+mkdir -p configs/local
+cp configs/train/default_single_shockley.json \
+  configs/local/my_single_shockley.json
+cp configs/train/default_double_shockley.json \
+  configs/local/my_double_shockley.json
+cp configs/train/default_custom_iv.json \
+  configs/local/my_custom_iv.json
+```
+
+Copy only the template or templates needed. After editing one, select it
+explicitly:
+
+```bash
+python scripts/train_drn.py \
+  --dataset mnist \
+  --non-linearity single \
+  --parameter-config configs/local/my_single_shockley.json \
+  --device cuda \
+  --download
+```
+
+The copied JSON's `non_linearity` must match the command. For measured/PWL,
+set `iv_data_path` in `configs/local/my_custom_iv.json`, or override that field
+for an individual run with `--iv-data-path path/to/curve.npz`.
+
+## Paper parameter sources
 
 | File | Dataset | Architecture / fixed sweeps | Active nonlinear updater |
 |---|---|---|---|

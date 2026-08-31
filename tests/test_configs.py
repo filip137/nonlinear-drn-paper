@@ -37,6 +37,25 @@ def test_training_configs_cover_all_paper_nonlinearities() -> None:
         assert config.scheduler_gamma == 1.0
 
 
+def test_editable_default_configs_cover_all_supported_nonlinearities() -> None:
+    paths = [
+        ROOT / "configs" / "train" / name
+        for name in (
+            "default_single_shockley.json",
+            "default_double_shockley.json",
+            "default_custom_iv.json",
+        )
+    ]
+    loaded = [load_training_config(path, repo_root=ROOT)[0] for path in paths]
+
+    assert {config.non_linearity for config in loaded} == set(PAPER_NONLINEARITIES)
+    assert loaded[0].layer_shapes[-1] == (10,)
+    assert loaded[1].layer_shapes[-1] == (20,)
+    assert loaded[2].layer_shapes[-1] == (20,)
+    assert loaded[2].iv_data_path is not None
+    assert Path(loaded[2].iv_data_path).is_file()
+
+
 def test_training_configs_declare_documented_json_schema() -> None:
     schema_path = ROOT / "configs" / "train" / "schema.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))

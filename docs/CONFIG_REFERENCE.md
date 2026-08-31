@@ -4,10 +4,49 @@ This document defines the complete JSON contract used by `configs/train/`,
 `repro.train`, and the compact runner in `repro.runner`. The machine-readable
 counterpart is [`configs/train/schema.json`](../configs/train/schema.json).
 
-The checked configurations are scientific provenance records as well as
+The checked paper configurations are scientific provenance records as well as
 executable inputs. Preserve their values when reproducing the paper. For a new
-experiment, copy a matching parameter source or use `scripts/train_drn.py` and
-inspect the expanded JSON with `--dry-run` before training.
+experiment, use the matching default parameter set or copy a default template
+to `configs/local/`, then inspect the expanded JSON with `--dry-run` before
+training.
+
+## Default templates and local changes
+
+The compact runner resolves `--parameter-set default` according to the
+requested nonlinearity:
+
+| Nonlinearity | Default template |
+|---|---|
+| `single_diode_exponential` | `configs/train/default_single_shockley.json` |
+| `double_diode_exponential` | `configs/train/default_double_shockley.json` |
+| `experimental` (measured/PWL) | `configs/train/default_custom_iv.json` |
+
+These sources are valid starting points for either Digits or MNIST, but their
+values were validated on Digits. Using them for MNIST creates a new experiment;
+it does not establish another paper-MNIST configuration or result. The
+`paper-mnist-xs` set remains specific to the reported double-Shockley DRN-XS
+run.
+
+Keep versioned templates unchanged. Put local variants under the git-ignored
+`configs/local/` directory and select the edited copy with
+`--parameter-config`:
+
+```bash
+mkdir -p configs/local
+cp configs/train/default_single_shockley.json \
+  configs/local/my_single_shockley.json
+# Edit configs/local/my_single_shockley.json before running:
+python scripts/train_drn.py \
+  --dataset mnist \
+  --non-linearity single \
+  --parameter-config configs/local/my_single_shockley.json \
+  --dry-run
+```
+
+The JSON `non_linearity` must match the runner selection. For measured/PWL
+sources, `iv_data_path` is the curve path stored in JSON; `--iv-data-path` is
+the compact runner override for one invocation. Relative curve paths resolve
+from the repository root.
 
 ## Numerical settings at a glance
 
@@ -164,6 +203,11 @@ inactive. Setting it to zero is valid and disables correction even if
 The measured nonlinearity loads voltage and current samples from
 `iv_data_path`, interpolates each segment linearly, and solves the local
 current-balance equation iteratively.
+
+Set `iv_data_path` in a copied `default_custom_iv.json` when the curve belongs
+to that local parameter source. To leave the JSON unchanged or try another
+curve for one run, pass `--iv-data-path PATH`; the command-line value overrides
+the JSON field.
 
 The `.npz` file must contain either one-dimensional `i` and `v` arrays of equal
 length, or one `iv` array shaped `(2, N)` with current in row 0 and voltage in
