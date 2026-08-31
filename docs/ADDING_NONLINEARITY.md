@@ -39,7 +39,7 @@ nonlinearity and an explicit PWL parameter source:
 python scripts/train_drn.py \
   --dataset digits \
   --non-linearity pwl \
-  --parameter-set paper-digits \
+  --parameter-set configs/train/default_custom_iv.json \
   --iv-data-path data/assets/my_curve.npz \
   --dry-run
 ```
@@ -136,12 +136,12 @@ error that names the expected values.
 Add one explicit parameter object to the training schema and dataclasses, then
 thread it through `repro.train._build_minimizer` and the corresponding builder
 in `repro.digits_validate`. Register the canonical name in the training loader,
-compact runner aliases and parameter-source map, output encoding choice, and
-the schema's `non_linearity` enumeration. A compact runner source must still
-provide a complete configuration; do not infer physical parameters from the
-alias alone. Add an entry to a bundled parameter-set map only if the repository
-also ships and audits a preset for the new law; otherwise use
-`--parameter-config`.
+compact runner, output encoding choice, and the schema's `non_linearity`
+enumeration. A compact runner source must still provide a complete
+configuration; do not infer physical parameters from the nonlinearity name.
+Ship an audited JSON source when appropriate and select other sources by path
+with `--parameter-set`; add a legacy bundled alias only when it is needed for
+compatibility.
 
 Training and checkpoint replay must construct the same energy interaction,
 parameter scaling, updater, and numerical settings. Store every new setting in

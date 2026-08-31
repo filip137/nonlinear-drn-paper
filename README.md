@@ -103,7 +103,7 @@ Train the compact double-Shockley anchor on CPU:
 python scripts/train_drn.py \
   --dataset digits \
   --non-linearity double \
-  --parameter-set paper-digits \
+  --parameter-set configs/train/digits_double_shockley.json \
   --epochs 10 \
   --device cpu
 ```
@@ -134,7 +134,7 @@ Launch the paper's double-Shockley DRN-XS configuration on CUDA:
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity double \
-  --parameter-set paper-mnist-xs \
+  --parameter-set configs/train/mnist_paper_double_shockley.json \
   --device cuda \
   --download \
   --seed 0
@@ -153,79 +153,15 @@ For a single-Shockley MNIST experiment, start from the bundled default instead:
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity single \
-  --parameter-set default \
+  --parameter-set configs/train/default_single_shockley.json \
   --device cuda \
   --download \
   --seed 0
 ```
 
-`default` is nonlinearity-aware: it selects
-`configs/train/default_single_shockley.json` for `single`,
-`default_double_shockley.json` for `double`, and `default_custom_iv.json` for
-`pwl`. These parameter sources can be used with either Digits or MNIST, but
-their values are validated Digits-derived starting points. The command above
-therefore defines a new MNIST experiment, not a paper-MNIST configuration or
-result. The paper-MNIST parameter set supports only `double`, which is why
-combining `--parameter-set paper-mnist-xs` with `--non-linearity single` is
-rejected.
-
-Choose `single`, `double`, or `pwl` for the three paper nonlinearities. The
-selected parameter set supplies
-known-working learning-rate and input-gain defaults; `--learning-rate` and
-`--input-gain` override them. The parameter set is required because it also
-supplies explicit physical diode parameters, which are never silently
-invented. Adaptive equilibrium is disabled during training. Every run saves
-the fully expanded configuration beside its checkpoints.
-
-To change a default's physical or solver settings, copy the matching template
-to the git-ignored `configs/local/` directory, edit the copy, and select it with
-`--parameter-config`:
-
-```bash
-mkdir -p configs/local
-cp configs/train/default_single_shockley.json \
-  configs/local/mnist_single.json
-# Edit configs/local/mnist_single.json, then run:
-python scripts/train_drn.py \
-  --dataset mnist \
-  --non-linearity single \
-  --parameter-config configs/local/mnist_single.json \
-  --device cuda \
-  --download \
-  --seed 0
-```
-
-Use either `--parameter-set` or `--parameter-config`, never both. For a custom
-measured/PWL template, set `iv_data_path` in the copied JSON or override it at
-the command line with `--iv-data-path`.
-
-The same interface is available as the Python function `repro.run_drn`.
-See [docs/TRAINING_RUNNER.md](docs/TRAINING_RUNNER.md) for Digits, MNIST,
-layerwise-learning-rate, dry-run, and custom-parameter examples. To inspect the
-fully expanded configuration without training or writing files, add
-`--dry-run`.
-
-Every checked training JSON points to an editor-aware schema. See
-[configs/train/README.md](configs/train/README.md) for the available parameter
-sources and [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) for the full
-field reference, including the Lambert-W large-argument threshold,
-exponent-clipping guard, Newton-polish settings, and which values are inactive
-for each nonlinearity.
-
-Run a checked JSON configuration directly, or smoke-test all three paper
-nonlinearities, with:
-
-```bash
-python scripts/reproduce.py train \
-  --config configs/train/digits_double_shockley.json \
-  --device cpu \
-  --epochs 15
-python scripts/reproduce.py train-smoke --device cpu
-```
-
-Training runs write the expanded configuration, history, final and best
-checkpoints, and runtime metadata under `outputs/training/` unless `--output`
-selects another directory.
+This JSON is a Digits-derived starting point, so the command defines a new
+MNIST experiment rather than a paper-MNIST result. The audited MNIST
+configuration remains double-Shockley-only.
 
 ## Use a custom I–V curve
 
@@ -250,16 +186,16 @@ Use the curve in the compact runner with:
 python scripts/train_drn.py \
   --dataset digits \
   --non-linearity pwl \
-  --parameter-set paper-digits \
+  --parameter-set configs/train/default_custom_iv.json \
   --iv-data-path my_curve.npz \
   --epochs 10 \
   --device cpu
 ```
 
-Here `paper-digits` still supplies the electrical and PWL solver settings; only
-the sampled curve is replaced. Relative curve paths are resolved from the
-repository root. Curves should span the intended operating-voltage range
-because the updater clamps outside the sampled range by default.
+The JSON file supplies the electrical and PWL solver settings; only the sampled
+curve is replaced. Relative curve paths are resolved from the repository root.
+Curves should span the intended operating-voltage range because the updater
+clamps outside the sampled range by default.
 
 For an analytic device law or another coordinate-update rule, see
 [docs/ADDING_NONLINEARITY.md](docs/ADDING_NONLINEARITY.md). It describes the

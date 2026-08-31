@@ -7,7 +7,7 @@
     "num_samples": null,
     "train_fraction": 0.8
   },
-  "layer_shapes": [[128], [64], [10]],
+  "layer_shapes": [[128], [100], [10]],
   "non_linearity": "single_diode_exponential",
   "weight_gains": [1.0, 1.0],
   "weight_min": 1e-7,

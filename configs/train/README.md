@@ -11,22 +11,22 @@ for changing solver values, read
 
 ## Default starting points
 
-The compact runner's `--parameter-set default` selects a template from the
-requested nonlinearity:
+Pass the JSON matching the requested nonlinearity directly to
+`--parameter-set`:
 
-| CLI nonlinearity | Template | Validated starting point |
+| CLI nonlinearity | Template | Starting architecture |
 |---|---|---|
-| `single` | `default_single_shockley.json` | Digits, one hidden layer of width 64 |
+| `single` | `default_single_shockley.json` | Digits, one hidden layer of width 100 |
 | `double` | `default_double_shockley.json` | Digits, one hidden layer of width 32 |
-| `pwl` | `default_custom_iv.json` | Digits, one hidden layer of width 32 |
+| `pwl` | `default_custom_iv.json` | Digits, one hidden layer of width 100 |
 
-The runner can use each template with either Digits or MNIST. Their values are
-validated Digits-derived starting points; using one with MNIST defines a new
-experiment and is not a paper-MNIST claim.
+The runner can use each template with either Digits or MNIST. Their settings
+are derived from the checked Digits sources; using a changed-width template or
+using one with MNIST defines a new experiment and is not a paper result.
 
 Do not edit a bundled template in place. Copy the matching file into the
-git-ignored `configs/local/` directory, edit that copy, and pass it through
-`--parameter-config`. For example:
+git-ignored `configs/local/` directory, edit that copy, and pass its path to
+`--parameter-set`. For example:
 
 ```bash
 mkdir -p configs/local
@@ -45,7 +45,7 @@ explicitly:
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity single \
-  --parameter-config configs/local/my_single_shockley.json \
+  --parameter-set configs/local/my_single_shockley.json \
   --device cuda \
   --download
 ```
@@ -58,10 +58,10 @@ for an individual run with `--iv-data-path path/to/curve.npz`.
 
 | File | Dataset | Architecture / fixed sweeps | Active nonlinear updater |
 |---|---|---|---|
-| `digits_single_shockley.json` | Digits | one hidden layer / 4 | single-Shockley Lambert-W |
-| `digits_double_shockley.json` | Digits | one hidden layer / 4 | double-Shockley float64 Lambert-W with overrelaxation |
-| `digits_pwl.json` | Digits | one hidden layer / 4 | measured/PWL damped Newton |
-| `mnist_paper_double_shockley.json` | MNIST | one hidden layer / 4 | paper DRN-XS float64 Lambert-W |
+| `digits_single_shockley.json` | Digits | width 64 / 4 | single-Shockley Lambert-W |
+| `digits_double_shockley.json` | Digits | width 32 / 4 | double-Shockley float64 Lambert-W with overrelaxation |
+| `digits_pwl.json` | Digits | width 32 / 4 | measured/PWL damped Newton |
+| `mnist_paper_double_shockley.json` | MNIST | width 100 / 4 | paper DRN-XS float64 Lambert-W |
 
 These files use a complete common schema. Consequently, they retain some
 compatibility fields that are inactive for the chosen nonlinearity. In
@@ -73,6 +73,11 @@ JSON does not support comments. Keep explanatory text in the shared schema and
 reference rather than adding ad hoc comment keys to individual experiment
 files. Use `python scripts/train_drn.py ... --dry-run` to inspect the fully
 expanded configuration before launching a run.
+
+Relative `--parameter-set` paths resolve from the repository root. The bundled
+names `default`, `paper-digits`, and `paper-mnist-xs`, and the
+`--parameter-config` path flag, remain available only for compatibility; new
+commands should use explicit JSON paths.
 
 For the compact runner, omitting `--hidden-sizes` inherits the selected
 parameter source's architecture. Digits then defaults to four iterations for

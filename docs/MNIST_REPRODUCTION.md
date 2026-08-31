@@ -94,7 +94,7 @@ python scripts/train_drn.py \
   --dataset mnist \
   --hidden-sizes 100 \
   --non-linearity double \
-  --parameter-set paper-mnist-xs \
+  --parameter-set configs/train/mnist_paper_double_shockley.json \
   --device cuda \
   --download \
   --seed 0

@@ -91,9 +91,9 @@ def test_runner_inherits_one_hidden_layer_digits_anchors(
 @pytest.mark.parametrize(
     ("name", "expected_hidden_width", "output_width"),
     [
-        ("single", 64, 10),
+        ("single", 100, 10),
         ("double", 32, 20),
-        ("pwl", 32, 20),
+        ("pwl", 100, 20),
     ],
 )
 def test_default_parameter_set_supports_every_nonlinearity_on_mnist(
@@ -135,6 +135,21 @@ def test_incompatible_paper_parameter_set_lists_working_alternatives() -> None:
     assert "default" in message
     assert "paper-digits" in message
     assert "new experiment, not a paper reproduction" in message
+
+
+def test_parameter_set_accepts_a_configuration_path() -> None:
+    source = ROOT / "configs" / "train" / "default_single_shockley.json"
+    config = build_training_config(
+        DRNRunSpec(
+            dataset="mnist",
+            non_linearity="single",
+            parameter_set=source,
+        ),
+        repo_root=ROOT,
+    )
+
+    assert config["layer_shapes"] == [[2, 28, 28], [100], [10]]
+    assert config["runner"]["parameter_source"] == str(source.relative_to(ROOT))
 
 
 @pytest.mark.parametrize(
@@ -421,7 +436,7 @@ def test_runner_dry_run_prints_resolved_config_without_training(capsys: pytest.C
             "--non-linearity",
             "double",
             "--parameter-set",
-            "paper-digits",
+            "configs/train/default_double_shockley.json",
             "--dry-run",
         ],
         repo_root=ROOT,
@@ -431,7 +446,9 @@ def test_runner_dry_run_prints_resolved_config_without_training(capsys: pytest.C
     assert status == 0
     assert printed["layer_shapes"] == [[128], [32], [20]]
     assert printed["num_iterations"] == 4
-    assert printed["runner"]["parameter_source"].startswith("parameter-set:paper-digits")
+    assert printed["runner"]["parameter_source"] == (
+        "configs/train/default_double_shockley.json"
+    )
     assert printed["runner"]["hidden_sizes_source"] == "parameter-source"
     assert printed["runner"]["num_iterations_source"] == "digits-depth-default"
 

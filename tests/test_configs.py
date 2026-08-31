@@ -49,6 +49,9 @@ def test_editable_default_configs_cover_all_supported_nonlinearities() -> None:
     loaded = [load_training_config(path, repo_root=ROOT)[0] for path in paths]
 
     assert {config.non_linearity for config in loaded} == set(PAPER_NONLINEARITIES)
+    assert loaded[0].layer_shapes[-2] == (100,)
+    assert loaded[1].layer_shapes[-2] == (32,)
+    assert loaded[2].layer_shapes[-2] == (100,)
     assert loaded[0].layer_shapes[-1] == (10,)
     assert loaded[1].layer_shapes[-1] == (20,)
     assert loaded[2].layer_shapes[-1] == (20,)
@@ -134,10 +137,14 @@ def test_paper_mnist_rates_align_with_optimizer_parameter_order() -> None:
         weight_max=config.weight_max,
         weight_init_mode=config.weight_init_mode,
     )
-    assert [(param.name, rate) for param, rate in zip(energy.params(), config.learning_rates)] == [
-        ("DenseWeight_0", 0.15),
-        ("DenseWeight_1", 0.08),
-        ("Bias_0", 0.05),
+    named_rates = [
+        (param.name.rsplit("_", 1)[0], rate)
+        for param, rate in zip(energy.params(), config.learning_rates)
+    ]
+    assert named_rates == [
+        ("DenseWeight", 0.15),
+        ("DenseWeight", 0.08),
+        ("Bias", 0.05),
     ]
 
 

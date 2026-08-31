@@ -68,8 +68,10 @@ SHORT_NAMES = {
 class DRNRunSpec:
     """Readable definition of one dense nonlinear-DRN training run.
 
-    ``parameter_set`` and ``parameter_config`` are mutually exclusive. One
-    must be supplied so that physical diode parameters are always explicit.
+    ``parameter_set`` accepts either a bundled name or a JSON configuration
+    path. ``parameter_config`` remains as a legacy path alias; the two are
+    mutually exclusive. One must be supplied so that physical diode parameters
+    are always explicit.
     When ``hidden_sizes`` is omitted, the selected parameter source supplies
     its anchor architecture. When ``learning_rate`` or ``input_gain`` is
     omitted, that source supplies its known-working value and preserves its
@@ -86,7 +88,7 @@ class DRNRunSpec:
     # build_training_config still requires a recognized nonlinearity.
     non_linearity: str = ""
     learning_rate: float | Sequence[float] | None = None
-    parameter_set: str | None = None
+    parameter_set: str | Path | None = None
     parameter_config: str | Path | None = None
     epochs: int | None = None
     batch_size: int | None = None
@@ -324,17 +326,16 @@ def create_parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--parameter-set",
-        choices=tuple(sorted(PARAMETER_SETS)),
+        metavar="NAME_OR_PATH",
         help=(
-            "Explicit bundled physical/solver parameter set. 'default' supports "
-            "single, double, and pwl on either dataset; paper presets retain "
-            "their audited scope."
+            "JSON file containing physical/solver parameters, or a bundled "
+            f"alias: {', '.join(sorted(PARAMETER_SETS))}."
         ),
     )
     source.add_argument(
         "--parameter-config",
         type=Path,
-        help="Custom JSON supplying explicit diode and solver parameters.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--iv-data-path",
@@ -532,7 +533,7 @@ def _resolve_parameter_source(
     root: Path,
     non_linearity: str,
     *,
-    parameter_set: str | None,
+    parameter_set: str | Path | None,
     parameter_config: str | Path | None,
 ) -> tuple[Path, str]:
     supplied = int(parameter_set is not None) + int(parameter_config is not None)
@@ -543,29 +544,31 @@ def _resolve_parameter_source(
             f"parameter_config={parameter_config!r}."
         )
     if parameter_set is not None:
-        if parameter_set not in PARAMETER_SETS:
-            raise ValueError(
-                f"Expected parameter_set to be one of {tuple(sorted(PARAMETER_SETS))}. "
-                f"Provided value: {parameter_set!r}."
-            )
-        choices = PARAMETER_SETS[parameter_set]
-        if non_linearity not in choices:
-            compatible_sets = tuple(
-                name
-                for name, supported in PARAMETER_SETS.items()
-                if non_linearity in supported
-            )
-            raise ValueError(
-                f"Expected parameter_set {parameter_set!r} to support {non_linearity!r}; "
-                f"supported nonlinearities are {tuple(choices)}. "
-                f"Provided value: {non_linearity!r}. Compatible bundled parameter "
-                f"sets are {compatible_sets}; use one of them with any dataset, or "
-                "supply --parameter-config. A cross-dataset combination is a new "
-                "experiment, not a paper reproduction."
-            )
-        relative = choices[non_linearity]
-        path = root / relative
-        label = f"parameter-set:{parameter_set} ({relative})"
+        parameter_source = str(parameter_set)
+        if parameter_source in PARAMETER_SETS:
+            choices = PARAMETER_SETS[parameter_source]
+            if non_linearity not in choices:
+                compatible_sets = tuple(
+                    name
+                    for name, supported in PARAMETER_SETS.items()
+                    if non_linearity in supported
+                )
+                raise ValueError(
+                    f"Expected parameter_set {parameter_source!r} to support "
+                    f"{non_linearity!r}; supported nonlinearities are {tuple(choices)}. "
+                    f"Provided value: {non_linearity!r}. Compatible bundled parameter "
+                    f"sets are {compatible_sets}; use one of them with any dataset, or "
+                    "pass a matching JSON path to --parameter-set. A cross-dataset "
+                    "combination is a new experiment, not a paper reproduction."
+                )
+            relative = choices[non_linearity]
+            path = root / relative
+            label = f"parameter-set:{parameter_source} ({relative})"
+        else:
+            path = Path(parameter_source).expanduser()
+            if not path.is_absolute():
+                path = root / path
+            label = _relative_or_absolute(path.resolve(), root)
     else:
         path = Path(str(parameter_config)).expanduser()
         if not path.is_absolute():

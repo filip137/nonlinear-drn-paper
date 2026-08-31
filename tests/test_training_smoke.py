@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
         "digits_single_shockley.json",
         "digits_double_shockley.json",
         "digits_pwl.json",
+        "default_single_shockley.json",
+        "default_custom_iv.json",
     ],
 )
 def test_one_batch_training_is_finite(

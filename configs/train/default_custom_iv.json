@@ -7,7 +7,7 @@
     "num_samples": null,
     "train_fraction": 0.8
   },
-  "layer_shapes": [[128], [32], [20]],
+  "layer_shapes": [[128], [100], [20]],
   "non_linearity": "experimental",
   "weight_gains": [1.0, 1.0],
   "weight_min": 1e-7,

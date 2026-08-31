@@ -12,24 +12,23 @@ training.
 
 ## Default templates and local changes
 
-The compact runner resolves `--parameter-set default` according to the
-requested nonlinearity:
+Pass the matching JSON directly through `--parameter-set`:
 
-| Nonlinearity | Default template |
-|---|---|
-| `single_diode_exponential` | `configs/train/default_single_shockley.json` |
-| `double_diode_exponential` | `configs/train/default_double_shockley.json` |
-| `experimental` (measured/PWL) | `configs/train/default_custom_iv.json` |
+| Nonlinearity | Default template | Hidden width |
+|---|---|---:|
+| `single_diode_exponential` | `configs/train/default_single_shockley.json` | 100 |
+| `double_diode_exponential` | `configs/train/default_double_shockley.json` | 32 |
+| `experimental` (measured/PWL) | `configs/train/default_custom_iv.json` | 100 |
 
-These sources are valid starting points for either Digits or MNIST, but their
-values were validated on Digits. Using them for MNIST creates a new experiment;
-it does not establish another paper-MNIST configuration or result. The
-`paper-mnist-xs` set remains specific to the reported double-Shockley DRN-XS
-run.
+These sources are starting points for either Digits or MNIST. Their settings
+are derived from the checked Digits sources, but the width-100 single/PWL
+templates and any MNIST use are new experiments rather than paper results. The
+`configs/train/mnist_paper_double_shockley.json` source remains specific to the
+reported double-Shockley DRN-XS run.
 
 Keep versioned templates unchanged. Put local variants under the git-ignored
 `configs/local/` directory and select the edited copy with
-`--parameter-config`:
+`--parameter-set`:
 
 ```bash
 mkdir -p configs/local
@@ -39,9 +38,13 @@ cp configs/train/default_single_shockley.json \
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity single \
-  --parameter-config configs/local/my_single_shockley.json \
+  --parameter-set configs/local/my_single_shockley.json \
   --dry-run
 ```
+
+Relative paths resolve from the repository root. The bundled parameter names
+and `--parameter-config` path flag remain available for legacy compatibility;
+new commands should use explicit JSON paths with `--parameter-set`.
 
 The JSON `non_linearity` must match the runner selection. For measured/PWL
 sources, `iv_data_path` is the curve path stored in JSON; `--iv-data-path` is
