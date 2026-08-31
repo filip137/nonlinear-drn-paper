@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -30,33 +31,61 @@ def test_training_configs_cover_all_paper_nonlinearities() -> None:
     for config in loaded:
         assert len(config.layer_shapes) == 3
         assert config.num_iterations == 4
-        assert config.quadratic_diode_param
-        assert config.exponential_diode_param
-        assert config.hard_sigmoid_param
+        if config.non_linearity != "experimental":
+            assert config.exponential_diode_param
         assert config.adaptive_equilibrium is False
         assert config.scheduler_gamma == 1.0
 
 
-def test_editable_default_configs_cover_all_supported_nonlinearities() -> None:
-    paths = [
-        ROOT / "configs" / "train" / name
-        for name in (
-            "default_single_shockley.json",
-            "default_double_shockley.json",
-            "default_custom_iv.json",
-        )
+def test_editable_defaults_are_dataset_specific_and_composed() -> None:
+    cases = [
+        ("default_single_shockley.json", "digits", "single_diode_exponential", 100),
+        ("default_double_shockley.json", "digits", "double_diode_exponential", 32),
+        ("default_custom_iv.json", "digits", "experimental", 100),
+        (
+            "default_mnist_single_shockley.json",
+            "mnist",
+            "single_diode_exponential",
+            100,
+        ),
+        (
+            "default_mnist_double_shockley.json",
+            "mnist",
+            "double_diode_exponential",
+            100,
+        ),
+        ("default_mnist_custom_iv.json", "mnist", "experimental", 100),
     ]
-    loaded = [load_training_config(path, repo_root=ROOT)[0] for path in paths]
+    seen: set[tuple[str, str]] = set()
 
-    assert {config.non_linearity for config in loaded} == set(PAPER_NONLINEARITIES)
-    assert loaded[0].layer_shapes[-2] == (100,)
-    assert loaded[1].layer_shapes[-2] == (32,)
-    assert loaded[2].layer_shapes[-2] == (100,)
-    assert loaded[0].layer_shapes[-1] == (10,)
-    assert loaded[1].layer_shapes[-1] == (20,)
-    assert loaded[2].layer_shapes[-1] == (20,)
-    assert loaded[2].iv_data_path is not None
-    assert Path(loaded[2].iv_data_path).is_file()
+    for name, dataset, non_linearity, hidden_width in cases:
+        path = ROOT / "configs" / "train" / name
+        config, expanded = load_training_config(path, repo_root=ROOT)
+        source = json.loads(path.read_text(encoding="utf-8"))
+
+        seen.add((dataset, non_linearity))
+        assert config.dataset["name"] == dataset
+        assert config.non_linearity == non_linearity
+        assert config.layer_shapes[-2] == (hidden_width,)
+        assert config.batch_size == 10
+        assert "simulator_profile" in source
+        assert "simulator_profile" not in expanded
+        assert expanded["simulator_profile_source"] == source["simulator_profile"]
+        profile_path = ROOT / source["simulator_profile"]
+        assert expanded["simulator_profile_sha256"] == hashlib.sha256(
+            profile_path.read_bytes()
+        ).hexdigest()
+        assert "quadratic_diode_param" not in expanded
+        assert "hard_sigmoid_param" not in expanded
+        if non_linearity == "experimental":
+            assert config.iv_data_path is not None
+            assert Path(config.iv_data_path).is_file()
+
+    assert seen == {
+        (dataset, non_linearity)
+        for dataset in ("digits", "mnist")
+        for non_linearity in PAPER_NONLINEARITIES
+    }
 
 
 def test_training_configs_declare_documented_json_schema() -> None:
@@ -90,6 +119,81 @@ def test_training_configs_declare_documented_json_schema() -> None:
         validator.validate(raw)
         assert raw["$schema"] == schema_url
         assert set(schema["required"]).issubset(raw)
+        assert "quadratic_diode_param" not in raw
+        assert "hard_sigmoid_param" not in raw
+
+
+def test_simulator_profiles_declare_documented_json_schema() -> None:
+    schema_path = ROOT / "configs" / "simulator" / "schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator_class = jsonschema.validators.validator_for(schema)
+    validator_class.check_schema(schema)
+    validator = validator_class(schema)
+    schema_url = schema["$id"]
+
+    for path in sorted((ROOT / "configs" / "simulator").glob("*.json")):
+        if path == schema_path:
+            continue
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        validator.validate(raw)
+        assert raw["$schema"] == schema_url
+
+
+def test_composed_config_reloads_without_profile_file_lookup(tmp_path: Path) -> None:
+    source = ROOT / "configs" / "train" / "default_single_shockley.json"
+    _, expanded = load_training_config(source, repo_root=ROOT)
+    generated = tmp_path / "config.generated.json"
+    generated.write_text(json.dumps(expanded), encoding="utf-8")
+
+    reloaded, reloaded_raw = load_training_config(generated, repo_root=ROOT)
+
+    assert reloaded.non_linearity == "single_diode_exponential"
+    assert reloaded_raw == expanded
+
+
+def test_simulator_profile_rejects_inline_setting_collisions(tmp_path: Path) -> None:
+    source = ROOT / "configs" / "train" / "default_single_shockley.json"
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    raw["mode"] = "asynchronous"
+    candidate = tmp_path / "collision.json"
+    candidate.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate fields.*mode"):
+        load_training_config(candidate, repo_root=ROOT)
+
+
+def test_simulator_profile_requires_existing_repo_file(tmp_path: Path) -> None:
+    source = ROOT / "configs" / "train" / "default_single_shockley.json"
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    raw["simulator_profile"] = "configs/simulator/does-not-exist.json"
+    candidate = tmp_path / "missing-profile.json"
+    candidate.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="existing JSON file"):
+        load_training_config(candidate, repo_root=ROOT)
+
+
+def test_legacy_unused_training_parameters_are_dropped(tmp_path: Path) -> None:
+    source = ROOT / "configs" / "train" / "digits_double_shockley.json"
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    raw["quadratic_diode_param"] = {
+        "diode_conductance": 1.0,
+        "v_min": -0.5,
+        "v_max": 0.5,
+    }
+    raw["hard_sigmoid_param"] = {
+        "g_on": 10.0,
+        "g_off": 0.1,
+        "v_min": -1.0,
+        "v_max": 1.0,
+    }
+    candidate = tmp_path / "legacy.json"
+    candidate.write_text(json.dumps(raw), encoding="utf-8")
+
+    _, expanded = load_training_config(candidate, repo_root=ROOT)
+
+    assert "quadratic_diode_param" not in expanded
+    assert "hard_sigmoid_param" not in expanded
 
 
 def test_paper_mnist_config_is_the_reported_drn_xs_shape() -> None:
@@ -129,8 +233,8 @@ def test_paper_mnist_rates_align_with_optimizer_parameter_order() -> None:
         input_gain=config.input_gain,
         non_linearity=config.non_linearity,
         exponential_diode_param=config.exponential_diode_param,
-        quadratic_diode_param=config.quadratic_diode_param,
-        hard_sigmoid_param=config.hard_sigmoid_param,
+        quadratic_diode_param={},
+        hard_sigmoid_param={},
         voltage_amp=config.voltage_amp,
         current_amp=config.current_amp,
         weight_min=config.weight_min,

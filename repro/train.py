@@ -31,6 +31,35 @@ PAPER_NONLINEARITIES = (
     "experimental",
 )
 
+_SIMULATOR_PROFILE_FIELDS = frozenset(
+    {
+        "non_linearity",
+        "voltage_amp",
+        "current_amp",
+        "exponential_diode_param",
+        "iv_data_path",
+        "minimizer_impl",
+        "mode",
+        "single_diode_updater",
+        "double_diode_updater",
+        "overrelaxation_factor",
+        "adaptive_equilibrium",
+        "rel_tol",
+        "vn_tol",
+        "use_polish",
+        "max_newton_iters",
+        "z_thresh",
+        "exp_clip",
+        "damping",
+        "experimental_newton_max_steps",
+        "experimental_newton_tol",
+    }
+)
+_SIMULATOR_PROFILE_METADATA_FIELDS = frozenset({"$schema", "description", "source"})
+_LEGACY_UNUSED_TRAINING_FIELDS = frozenset(
+    {"quadratic_diode_param", "hard_sigmoid_param"}
+)
+
 
 @dataclass(frozen=True)
 class TrainingConfig:
@@ -45,9 +74,7 @@ class TrainingConfig:
     input_gain: float
     voltage_amp: float
     current_amp: float
-    quadratic_diode_param: dict[str, Any]
     exponential_diode_param: dict[str, Any]
-    hard_sigmoid_param: dict[str, Any]
     batch_size: int
     num_epochs: int
     num_iterations: int
@@ -149,6 +176,15 @@ class _LiveProgress:
 
 def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig, dict[str, Any]]:
     raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "Expected the training configuration to contain a JSON object. "
+            f"Provided value in {path}: {type(raw).__name__}."
+        )
+    raw = _compose_simulator_profile(raw, repo_root=repo_root)
+    for legacy_field in _LEGACY_UNUSED_TRAINING_FIELDS:
+        raw.pop(legacy_field, None)
+
     dataset = _required_dict(raw, "dataset")
     dataset_name = str(dataset.get("name", "")).strip().lower()
     if dataset_name not in {"digits", "mnist"}:
@@ -164,12 +200,11 @@ def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig
             f"Provided value: {non_linearity!r}."
         )
 
-    quadratic = _required_dict(raw, "quadratic_diode_param")
-    exponential = _required_dict(raw, "exponential_diode_param")
-    hard_sigmoid = _required_dict(raw, "hard_sigmoid_param")
-    _require_keys(quadratic, ("diode_conductance", "v_min", "v_max"), "quadratic_diode_param")
-    _require_keys(exponential, ("I_s", "V_t", "V_off"), "exponential_diode_param")
-    _require_keys(hard_sigmoid, ("g_on", "g_off", "v_min", "v_max"), "hard_sigmoid_param")
+    if non_linearity in {"single_diode_exponential", "double_diode_exponential"}:
+        exponential = _required_dict(raw, "exponential_diode_param")
+        _require_keys(exponential, ("I_s", "V_t", "V_off"), "exponential_diode_param")
+    else:
+        exponential = {}
 
     shapes_raw = _required_list(raw, "layer_shapes")
     if len(shapes_raw) < 2 or any(not isinstance(shape, list) or not shape for shape in shapes_raw):
@@ -229,9 +264,7 @@ def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig
         input_gain=float(_required(raw, "input_gain")),
         voltage_amp=float(_required(raw, "voltage_amp")),
         current_amp=float(_required(raw, "current_amp")),
-        quadratic_diode_param=quadratic,
         exponential_diode_param=exponential,
-        hard_sigmoid_param=hard_sigmoid,
         batch_size=int(_required(raw, "batch_size")),
         num_epochs=int(_required(raw, "num_epochs")),
         num_iterations=int(_required(raw, "num_iterations")),
@@ -305,8 +338,8 @@ def run_training(
         input_gain=cfg.input_gain,
         non_linearity=cfg.non_linearity,
         exponential_diode_param=cfg.exponential_diode_param,
-        quadratic_diode_param=cfg.quadratic_diode_param,
-        hard_sigmoid_param=cfg.hard_sigmoid_param,
+        quadratic_diode_param={},
+        hard_sigmoid_param={},
         voltage_amp=cfg.voltage_amp,
         current_amp=cfg.current_amp,
         weight_min=cfg.weight_min,
@@ -641,7 +674,7 @@ def _build_minimizer(cfg: TrainingConfig, fn, free_layers, num_iterations: int):
         num_iterations=num_iterations,
         mode=cfg.mode,
         non_linearity=cfg.non_linearity,
-        quadratic_diode_param=cfg.quadratic_diode_param,
+        quadratic_diode_param={},
         exponential_diode_param=cfg.exponential_diode_param,
         voltage_amp=cfg.voltage_amp,
         current_amp=cfg.current_amp,
@@ -779,6 +812,90 @@ def _validate_input_state(network, raw_inputs: torch.Tensor) -> None:
             "Expected doubled input tensor shape to match config 'layer_shapes[0]'. "
             f"Provided value: raw_shape={tuple(raw_inputs.shape)}, doubled_shape={provided}, expected={expected}."
         )
+
+
+def _compose_simulator_profile(
+    training: dict[str, Any],
+    *,
+    repo_root: Path,
+) -> dict[str, Any]:
+    """Expand a repo-relative simulator profile into a training configuration."""
+
+    if "simulator_profile" not in training:
+        return dict(training)
+
+    reference = training["simulator_profile"]
+    if not isinstance(reference, str) or not reference.strip():
+        raise ValueError(
+            "Expected config field 'simulator_profile' to be a non-empty, "
+            f"repo-relative path. Provided value: {reference!r}."
+        )
+
+    root = repo_root.expanduser().resolve()
+    relative_path = Path(reference.strip())
+    if relative_path.is_absolute():
+        raise ValueError(
+            "Expected config field 'simulator_profile' to be relative to the repository root. "
+            f"Provided value: {reference!r}."
+        )
+    profile_path = (root / relative_path).resolve()
+    try:
+        profile_path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            "Expected config field 'simulator_profile' to resolve inside the repository root. "
+            f"Provided value: {reference!r}."
+        ) from exc
+
+    if not profile_path.is_file():
+        raise ValueError(
+            "Expected config field 'simulator_profile' to name an existing JSON file. "
+            f"Provided value: {reference!r} (resolved to {profile_path})."
+        )
+    try:
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "Expected config field 'simulator_profile' to name a readable JSON file. "
+            f"Provided value: {reference!r} ({exc})."
+        ) from exc
+    if not isinstance(profile, dict):
+        raise ValueError(
+            "Expected the simulator profile to contain a JSON object. "
+            f"Provided value in {profile_path}: {type(profile).__name__}."
+        )
+
+    allowed_profile_fields = (
+        _SIMULATOR_PROFILE_FIELDS
+        | _SIMULATOR_PROFILE_METADATA_FIELDS
+        | _LEGACY_UNUSED_TRAINING_FIELDS
+    )
+    unknown_fields = sorted(set(profile).difference(allowed_profile_fields))
+    if unknown_fields:
+        raise ValueError(
+            "Expected simulator profile fields to be recognized simulator settings or metadata. "
+            f"Provided unknown fields in {profile_path}: {unknown_fields}."
+        )
+
+    simulator_values = {
+        key: value for key, value in profile.items() if key in _SIMULATOR_PROFILE_FIELDS
+    }
+    collisions = sorted(set(training).intersection(simulator_values))
+    if collisions:
+        raise ValueError(
+            "Expected simulator settings to come either from 'simulator_profile' or inline, "
+            "not both. "
+            f"Provided duplicate fields: {collisions}."
+        )
+
+    expanded = dict(training)
+    expanded.pop("simulator_profile")
+    expanded.pop("simulator_profile_source", None)
+    expanded.pop("simulator_profile_sha256", None)
+    expanded.update(simulator_values)
+    expanded["simulator_profile_source"] = _relative_or_absolute(profile_path, root)
+    expanded["simulator_profile_sha256"] = _sha256(profile_path)
+    return expanded
 
 
 def _validate_scalar_fields(cfg: TrainingConfig) -> None:

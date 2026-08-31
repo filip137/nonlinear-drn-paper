@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
         "digits_double_shockley.json",
         "digits_pwl.json",
         "default_single_shockley.json",
+        "default_double_shockley.json",
         "default_custom_iv.json",
     ],
 )

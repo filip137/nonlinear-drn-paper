@@ -8,8 +8,10 @@ together, and one call builds and launches the complete run.
 The runner does not replace the checked JSON configurations used for exact
 paper reproduction. It expands the compact definition into
 `config.generated.json`, and the training code additionally writes
-`config.resolved.json`. Consequently, every result retains all physical,
-solver, dataset, architecture, and runtime settings.
+`config.resolved.json`. Editable defaults compose a training template with its
+referenced simulator profile. Both saved configurations contain the fully
+expanded, self-contained settings and retain the simulator profile's source
+path and SHA-256 hash.
 
 ## Command-line examples
 
@@ -90,7 +92,7 @@ launch a single-Shockley MNIST experiment with:
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity single \
-  --parameter-set configs/train/default_single_shockley.json \
+  --parameter-set configs/train/default_mnist_single_shockley.json \
   --device cuda \
   --download \
   --seed 0
@@ -99,6 +101,22 @@ python scripts/train_drn.py \
 This is a new MNIST experiment, not a claimed paper configuration or result.
 The audited `configs/train/mnist_paper_double_shockley.json` source cannot be
 substituted here because it supports only the double-Shockley nonlinearity.
+
+The corresponding measured/PWL starting point is also dataset-specific:
+
+```bash
+python scripts/train_drn.py \
+  --dataset mnist \
+  --non-linearity pwl \
+  --parameter-set configs/train/default_mnist_custom_iv.json \
+  --device cuda \
+  --download \
+  --seed 0
+```
+
+Both the MNIST single-Shockley and PWL templates adapt validated Digits
+settings; neither is a paper-MNIST result. Only double Shockley has audited
+MNIST paper parameters.
 
 ### Nonlinearity names
 
@@ -113,47 +131,48 @@ The short names are:
 Canonical names are accepted directly. Single-Shockley hidden widths must be
 even because each layer is divided into forward- and reverse-oriented nodes.
 
-## Known-working defaults
+## Dataset-specific defaults
 
-Learning rate and input gain are optional. They come from the explicitly
-selected JSON source when their flags are omitted. The reusable starting
-templates are:
+Learning rate, input gain, architecture, batch size, and seed come from the
+explicitly selected training template when their flags are omitted. Each
+template references a simulator profile for its physical and solver settings:
 
-| Nonlinearity | Source | Hidden width |
-|---|---|---:|
-| single Shockley | `configs/train/default_single_shockley.json` | 100 |
-| double Shockley | `configs/train/default_double_shockley.json` | 32 |
-| measured/PWL | `configs/train/default_custom_iv.json` | 100 |
+| Dataset | Nonlinearity | Training template | Hidden width | Simulator profile |
+|---|---|---|---:|---|
+| Digits | single Shockley | `default_single_shockley.json` | 100 | `default_single_shockley.json` |
+| Digits | double Shockley | `default_double_shockley.json` | 32 | `default_double_shockley.json` |
+| Digits | measured/PWL | `default_custom_iv.json` | 100 | `default_pwl.json` |
+| MNIST | single Shockley | `default_mnist_single_shockley.json` | 100 | `default_single_shockley.json` |
+| MNIST | double Shockley | `default_mnist_double_shockley.json` | 100 | `default_mnist_double_shockley.json` |
+| MNIST | measured/PWL | `default_mnist_custom_iv.json` | 100 | `default_pwl.json` |
 
-All three can be used with either Digits or MNIST. Their settings are
-Digits-derived starting points, not newly reported paper-MNIST settings. The
-learning-rate, input-gain, and architecture anchors are:
+Training templates are under `configs/train/`; profiles are under
+`configs/simulator/`. All six editable defaults use batch size 10. The MNIST
+single-Shockley and PWL rows deliberately reuse Digits-derived simulator
+profiles and are new-experiment starting points. The double-Shockley row is the
+only MNIST default with audited MNIST physical settings; exact paper
+reproduction still uses `configs/train/mnist_paper_double_shockley.json`.
 
-| Parameter source | Nonlinearity | Default learning rate | Default input gain | Anchor |
-|---|---|---:|---:|---|
-| `default_single_shockley.json` | single Shockley | 0.005 for weights; 0 for bias | 10 | Reusable Digits-derived start, width 100 |
-| `default_double_shockley.json` | double Shockley | 0.01 | 10 | Reusable Digits-derived start, width 32 |
-| `default_custom_iv.json` | measured/PWL | 0.01 | 10 | Reusable Digits-derived start, width 100 |
-| `digits_single_shockley.json` | single Shockley | 0.005 for weights; 0 for bias | 10 | Checked paper-Digits source, width 64 |
-| `digits_double_shockley.json` | double Shockley | 0.01 | 10 | Checked paper-Digits source, width 32 |
-| `digits_pwl.json` | measured/PWL | 0.01 | 10 | Checked paper-Digits source, width 32 |
-| `mnist_paper_double_shockley.json` | double Shockley | 0.15 / 0.08 / 0.05 (weight / weight / bias) | 50 | MNIST accuracy-panel DRN-XS, width 100 |
+The `default` alias chooses the correct row from both `dataset` and
+`non_linearity`. Explicit paths are preferred because they expose the selected
+source directly:
 
-Architecture is optional for Digits as well. When `--hidden-sizes` is omitted,
-the selected source supplies its architecture. The default single-Shockley and
-PWL templates use width 100, while the default double-Shockley template uses
-width 32. The checked paper-Digits sources retain widths 64, 32, and 32,
-respectively. Omitted Digits solver iterations depend on the resulting depth:
-four for one hidden layer, eight for two or three hidden layers, and the
-parameter source's value for four or more. An explicit `--num-iterations`
-always takes precedence.
+```bash
+--parameter-set configs/train/default_mnist_single_shockley.json
+```
+
+Architecture remains optional. When `--hidden-sizes` is omitted, the selected
+training template supplies its architecture. Omitted Digits solver iterations
+depend on the resulting depth: four for one hidden layer, eight for two or
+three hidden layers, and the training template's value for four or more. An
+explicit `--num-iterations` always takes precedence.
 
 The default templates are starting points rather than a claim that one rate is
 optimal for every depth and width. On the deterministic Digits split
 (`seed=0`), the checked width-64/32/32 paper-Digits sources reached 93.6% test
 accuracy for single Shockley and 93.1% for both double Shockley and measured/PWL
-after 15 epochs and four sweeps on the Python 3.12 CPU reference stack. These checks are
-not additional paper results.
+after 15 epochs and four sweeps on the Python 3.12 CPU reference stack. These
+checks are not additional paper results.
 
 A uniform source default is expanded to every conductance and bias tensor when
 the architecture is resized. The single-Shockley source instead preserves the
@@ -257,8 +276,11 @@ python scripts/train_drn.py \
   --dry-run
 ```
 
-The custom file overrides the parameter source's `iv_data_path`; it does not
-replace that source's damping, Newton, amplification, or optimizer settings.
+The command-line curve overrides the referenced simulator profile's
+`iv_data_path`. It does not replace that profile's damping, Newton, or
+amplification settings, and optimizer settings continue to come from the
+training template.
+
 The NPZ must contain either equal-length, one-dimensional `i` and `v` arrays or
 an `iv` array shaped exactly `(2, N)` in current-then-voltage order. It must
 contain at least two real numeric, finite samples, with strictly increasing
@@ -272,49 +294,65 @@ Use `iv_data_path="data/assets/my_curve.npz"` in `DRNRunSpec` for the Python
 interface. See [`ADDING_NONLINEARITY.md`](ADDING_NONLINEARITY.md) for a file
 creation example and for the code path required by a new analytic current law.
 
-## Physical parameter sources
+## Training sources and simulator profiles
 
-The runner requires one explicit JSON source. Pass its repository-relative or
-absolute path through `--parameter-set` (or `parameter_set` in
-`DRNRunSpec`). Use a matching `default_*.json` template for a new experiment,
-one of the three `digits_*.json` files for the checked paper-Digits settings,
-or `mnist_paper_double_shockley.json` for the reported MNIST DRN-XS settings.
+The runner requires one explicit training JSON source. Pass its
+repository-relative or absolute path through `--parameter-set` (or
+`parameter_set` in `DRNRunSpec`). Use the `default_*.json` file matching both
+dataset and nonlinearity for a new experiment, one of the three `digits_*.json`
+files for the checked paper-Digits settings, or
+`mnist_paper_double_shockley.json` for the reported MNIST DRN-XS settings.
 
-The names `default`, `paper-digits`, and `paper-mnist-xs` remain accepted as
-legacy bundled aliases. `--parameter-config` and `DRNRunSpec.parameter_config`
-remain legacy path aliases; new commands and code should use `parameter_set`.
+The alias `default` is dataset- and nonlinearity-aware. The names
+`paper-digits` and `paper-mnist-xs` also remain accepted as bundled aliases.
+`--parameter-config` and `DRNRunSpec.parameter_config` remain legacy path
+aliases; new commands and code should use an explicit path through
+`parameter_set`.
 
-A custom parameter JSON must have the same complete schema as the examples in
-`configs/train/`, including non-empty `quadratic_diode_param`,
-`exponential_diode_param`, and `hard_sigmoid_param` dictionaries. Its
-`non_linearity` must match the requested run. A measured/PWL source must also
-provide `iv_data_path`; the compact run's `iv_data_path`/`--iv-data-path` can
-then replace that curve. Relative paths are resolved from the repository root.
+An editable training JSON has the training schema used by the defaults in
+`configs/train/` and must declare `simulator_profile`. The referenced profile
+must contain the physical and solver fields and its `non_linearity` must match
+the requested run. Shockley profiles provide `exponential_diode_param`; a
+measured/PWL profile provides `iv_data_path`. The compact run's
+`iv_data_path`/`--iv-data-path` can replace that curve. A profile reference is
+repository-relative and must resolve inside the repository.
 
 ### Edit a default template
 
-Keep the bundled templates unchanged. Copy the one matching the requested
-nonlinearity into the git-ignored `configs/local/` directory and edit that
+Keep the bundled templates unchanged. Copy the one matching both the dataset
+and nonlinearity into the git-ignored `configs/local/` directory and edit that
 copy. For example:
 
 ```bash
 mkdir -p configs/local
-cp configs/train/default_single_shockley.json \
-  configs/local/my_single_shockley.json
-# Edit configs/local/my_single_shockley.json, then run:
+cp configs/train/default_mnist_single_shockley.json \
+  configs/local/my_mnist_single.json
+# Edit configs/local/my_mnist_single.json, then run:
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity single \
-  --parameter-set configs/local/my_single_shockley.json \
+  --parameter-set configs/local/my_mnist_single.json \
   --device cuda \
   --download
 ```
 
-Equivalent starting copies for the other nonlinearities are
-`default_double_shockley.json` and `default_custom_iv.json`. A copied source's
-`non_linearity` must continue to match the requested run. In the custom-I-V
-copy, change the JSON field `iv_data_path`, or pass `--iv-data-path PATH` to
-override it for one run.
+This is sufficient for training, model, and data changes. `seed` intentionally
+remains here because it governs parameter initialization, data splitting, and
+loader order.
+
+To change the physical or coordinate-solver settings too, copy the referenced
+profile and update the local training file's `simulator_profile` value:
+
+```bash
+cp configs/simulator/default_single_shockley.json \
+  configs/local/my_single_simulator.json
+```
+
+Set `simulator_profile` in `configs/local/my_mnist_single.json` to
+`configs/local/my_single_simulator.json`. For a custom I-V source, start from
+`default_mnist_custom_iv.json` on MNIST or `default_custom_iv.json` on Digits,
+copy `configs/simulator/default_pwl.json`, and edit `iv_data_path` in the copied
+profile. Alternatively, pass `--iv-data-path PATH` for a one-run override.
 
 For example:
 
@@ -334,7 +372,8 @@ Unless `--output` is supplied, runs are placed under
 `outputs/training/runner/`. Each run contains:
 
 - `config.generated.json`: the compact runner definition expanded to the full
-  training schema;
+  training and simulator settings, including `simulator_profile_source` and
+  `simulator_profile_sha256`;
 - `config.resolved.json`: runtime overrides and resolved paths;
 - `history.json`: epoch-wise losses and accuracies;
 - `model.pt` and `model_best.pt`: final and best checkpoints; and

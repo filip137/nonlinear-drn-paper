@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/simulator/schema.json",
+  "description": "Default simulator profile for double-Shockley training on Digits.",
+  "non_linearity": "double_diode_exponential",
+  "voltage_amp": 4.0,
+  "current_amp": 1.0,
+  "exponential_diode_param": {"I_s": 1e-6, "V_t": 0.05, "V_off": 0.8},
+  "minimizer_impl": "custom",
+  "mode": "asynchronous",
+  "single_diode_updater": "custom",
+  "double_diode_updater": "float64_overrelaxed",
+  "overrelaxation_factor": 1.2,
+  "adaptive_equilibrium": false,
+  "rel_tol": 1e-5,
+  "vn_tol": 1e-6,
+  "use_polish": false,
+  "max_newton_iters": 32,
+  "z_thresh": 1e10,
+  "exp_clip": 165.0,
+  "damping": 0.5,
+  "experimental_newton_max_steps": 32,
+  "experimental_newton_tol": 1e-5
+}

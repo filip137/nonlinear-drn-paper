@@ -153,15 +153,18 @@ For a single-Shockley MNIST experiment, start from the bundled default instead:
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity single \
-  --parameter-set configs/train/default_single_shockley.json \
+  --parameter-set configs/train/default_mnist_single_shockley.json \
   --device cuda \
   --download \
   --seed 0
 ```
 
-This JSON is a Digits-derived starting point, so the command defines a new
-MNIST experiment rather than a paper-MNIST result. The audited MNIST
-configuration remains double-Shockley-only.
+This MNIST template adapts the validated Digits single-Shockley settings, so
+the command defines a new experiment rather than a paper-MNIST result. Only
+the double-Shockley MNIST configuration has audited paper parameters. The six
+dataset-specific defaults all use batch size 10; see
+[configs/train/README.md](configs/train/README.md) for the default table and
+the training-template/simulator-profile copy-and-edit workflow.
 
 ## Use a custom I–V curve
 
@@ -184,18 +187,22 @@ Use the curve in the compact runner with:
 
 ```bash
 python scripts/train_drn.py \
-  --dataset digits \
+  --dataset mnist \
   --non-linearity pwl \
-  --parameter-set configs/train/default_custom_iv.json \
+  --parameter-set configs/train/default_mnist_custom_iv.json \
   --iv-data-path my_curve.npz \
   --epochs 10 \
-  --device cpu
+  --device cuda \
+  --download
 ```
 
-The JSON file supplies the electrical and PWL solver settings; only the sampled
-curve is replaced. Relative curve paths are resolved from the repository root.
-Curves should span the intended operating-voltage range because the updater
-clamps outside the sampled range by default.
+For Digits, use `configs/train/default_custom_iv.json` instead. The training
+template references `configs/simulator/default_pwl.json`; `--iv-data-path`
+overrides that profile's `iv_data_path` for this run. Relative curve paths
+resolve from the repository root, and curves should span the intended operating
+range. The MNIST PWL template is a Digits-derived starter, not a paper-MNIST
+result; see [configs/train/README.md](configs/train/README.md) for reusable
+profile edits.
 
 For an analytic device law or another coordinate-update rule, see
 [docs/ADDING_NONLINEARITY.md](docs/ADDING_NONLINEARITY.md). It describes the

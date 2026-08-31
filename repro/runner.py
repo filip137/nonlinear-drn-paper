@@ -40,13 +40,22 @@ NONLINEARITY_ALIASES = {
 }
 
 # A parameter set is an explicit choice: it supplies the physical diode
-# dictionaries and nonlinear-solver settings.  It is never selected silently.
-PARAMETER_SETS: dict[str, dict[str, str]] = {
-    "default": {
+# parameters and nonlinear-solver settings.  ``default`` is dataset-aware;
+# the paper aliases remain fixed, audited sources.
+DEFAULT_PARAMETER_SOURCES: dict[str, dict[str, str]] = {
+    "digits": {
         "single_diode_exponential": "configs/train/default_single_shockley.json",
         "double_diode_exponential": "configs/train/default_double_shockley.json",
         "experimental": "configs/train/default_custom_iv.json",
     },
+    "mnist": {
+        "single_diode_exponential": "configs/train/default_mnist_single_shockley.json",
+        "double_diode_exponential": "configs/train/default_mnist_double_shockley.json",
+        "experimental": "configs/train/default_mnist_custom_iv.json",
+    },
+}
+
+PARAMETER_SETS: dict[str, dict[str, str]] = {
     "paper-digits": {
         "single_diode_exponential": "configs/train/digits_single_shockley.json",
         "double_diode_exponential": "configs/train/digits_double_shockley.json",
@@ -74,7 +83,7 @@ class DRNRunSpec:
     are always explicit.
     When ``hidden_sizes`` is omitted, the selected parameter source supplies
     its anchor architecture. When ``learning_rate`` or ``input_gain`` is
-    omitted, that source supplies its known-working value and preserves its
+    omitted, that source supplies its configured value and preserves its
     weight/bias policy when the depth changes. A scalar learning rate is
     expanded over all dense weights and hidden-layer biases. A sequence must
     contain either one value or exactly ``2H + 1`` values for ``H`` hidden
@@ -124,6 +133,7 @@ def build_training_config(
         )
     source_path, source_label = _resolve_parameter_source(
         root,
+        dataset,
         non_linearity,
         parameter_set=spec.parameter_set,
         parameter_config=spec.parameter_config,
@@ -218,11 +228,8 @@ def build_training_config(
         config["runner"]["iv_data_source"] = iv_data_source
 
     _validate_positive("weight_gain", spec.weight_gain)
-    for field in (
-        "quadratic_diode_param",
-        "exponential_diode_param",
-        "hard_sigmoid_param",
-    ):
+    if non_linearity != "experimental":
+        field = "exponential_diode_param"
         if not isinstance(config.get(field), dict) or not config[field]:
             raise ValueError(
                 f"Expected parameter source '{field}' to be a non-empty object. "
@@ -311,7 +318,7 @@ def create_parser() -> argparse.ArgumentParser:
         metavar="LR",
         help=(
             "One shared rate, or one rate per weight/bias parameter. "
-            "Defaults to the known-working rate in the parameter source."
+            "Defaults to the rate in the selected training source."
         ),
     )
     parser.add_argument(
@@ -328,8 +335,9 @@ def create_parser() -> argparse.ArgumentParser:
         "--parameter-set",
         metavar="NAME_OR_PATH",
         help=(
-            "JSON file containing physical/solver parameters, or a bundled "
-            f"alias: {', '.join(sorted(PARAMETER_SETS))}."
+            "Training JSON file (optionally referencing a simulator profile), "
+            "or a bundled "
+            f"alias: {', '.join(sorted((*PARAMETER_SETS, 'default')))}."
         ),
     )
     source.add_argument(
@@ -363,7 +371,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--input-gain",
         type=float,
         default=None,
-        help="Override the known-working input gain in the parameter source.",
+        help="Override the input gain in the selected training source.",
     )
     parser.add_argument("--voltage-amp", type=float, default=None)
     parser.add_argument("--current-amp", type=float, default=None)
@@ -531,6 +539,7 @@ def _resolve_num_iterations(
 
 def _resolve_parameter_source(
     root: Path,
+    dataset: str,
     non_linearity: str,
     *,
     parameter_set: str | Path | None,
@@ -545,10 +554,15 @@ def _resolve_parameter_source(
         )
     if parameter_set is not None:
         parameter_source = str(parameter_set)
-        if parameter_source in PARAMETER_SETS:
+        if parameter_source == "default":
+            choices = DEFAULT_PARAMETER_SOURCES[dataset]
+            relative = choices[non_linearity]
+            path = root / relative
+            label = f"parameter-set:default ({relative})"
+        elif parameter_source in PARAMETER_SETS:
             choices = PARAMETER_SETS[parameter_source]
             if non_linearity not in choices:
-                compatible_sets = tuple(
+                compatible_sets = ("default",) + tuple(
                     name
                     for name, supported in PARAMETER_SETS.items()
                     if non_linearity in supported
@@ -778,21 +792,26 @@ def _resolve_input_path(root: Path, value: str | Path) -> Path:
 
 def _run_summary(config: dict[str, Any]) -> str:
     runner = config["runner"]
-    return "\n".join(
+    lines = [
+        f"Dataset: {config['dataset']['name']}",
+        f"Network: {config['layer_shapes']}",
+        f"Nonlinearity: {config['non_linearity']}",
         (
-            f"Dataset: {config['dataset']['name']}",
-            f"Network: {config['layer_shapes']}",
-            f"Nonlinearity: {config['non_linearity']}",
-            (
-                f"Learning rates: {config['learning_rates']} "
-                f"({runner['learning_rate_source']})"
-            ),
-            f"Input gain: {config['input_gain']} ({runner['input_gain_source']})",
-            "Adaptive equilibrium during training: false",
-            f"Parameter source: {runner['parameter_source']}",
-            f"Epochs: {config['num_epochs']} | iterations: {config['num_iterations']}",
-        )
+            f"Learning rates: {config['learning_rates']} "
+            f"({runner['learning_rate_source']})"
+        ),
+        f"Input gain: {config['input_gain']} ({runner['input_gain_source']})",
+        f"Batch size: {config['batch_size']}",
+        "Adaptive equilibrium during training: false",
+        f"Parameter source: {runner['parameter_source']}",
+    ]
+    simulator_source = config.get("simulator_profile_source")
+    if simulator_source is not None:
+        lines.append(f"Simulator profile: {simulator_source}")
+    lines.append(
+        f"Epochs: {config['num_epochs']} | iterations: {config['num_iterations']}"
     )
+    return "\n".join(lines)
 
 
 def _resolve_repo_root(repo_root: Path | None) -> Path:

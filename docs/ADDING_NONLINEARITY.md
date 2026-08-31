@@ -44,21 +44,27 @@ python scripts/train_drn.py \
   --dry-run
 ```
 
-`--iv-data-path` replaces only the parameter source's curve. Damping, Newton
-limits, amplification, learning rates, and all other settings still come from
-the selected source unless their own flags override them. The flag is valid
-only with `pwl`, `measured`, or canonical `experimental`; using it with a
+The selected training template references
+`configs/simulator/default_pwl.json`. `--iv-data-path` replaces only that
+profile's curve; damping, Newton limits, and amplification still come from the
+profile, while learning rates remain in the training template. The flag is
+valid only with `pwl`, `measured`, or canonical `experimental`; using it with a
 Shockley model is an error. Relative paths are resolved from the repository
 root, and `--dry-run` validates the file before any output directory or dataset
 is created. The expanded configuration records whether the curve came from the
-parameter source or the user as `runner.iv_data_source`. Paths inside the
-repository are serialized relative to its root; external paths remain
-absolute.
+profile or the user as `runner.iv_data_source`, along with the simulator
+profile source and SHA-256 hash. Paths inside the repository are serialized
+relative to its root; external paths remain absolute.
 
-The equivalent Python field is `DRNRunSpec.iv_data_path`. The lower-level
+The equivalent Python field is `DRNRunSpec.iv_data_path`. For a reusable local
+curve choice, copy both `configs/train/default_custom_iv.json` and its
+`configs/simulator/default_pwl.json` profile into `configs/local/`, point the
+training copy's `simulator_profile` at the profile copy, and edit
+`iv_data_path` there. On MNIST, start from
+`configs/train/default_mnist_custom_iv.json`; its simulator settings remain a
+Digits-derived starting point rather than a paper-MNIST result. The lower-level
 `python scripts/reproduce.py train` interface does not have a separate curve
-flag: set `iv_data_path` in its JSON configuration instead. A JSON-relative
-path is also interpreted relative to the repository root.
+flag and uses the profile referenced by its JSON configuration.
 
 The measured updater linearly interpolates `I(v)` and solves the coordinate
 current balance
@@ -133,22 +139,24 @@ error that names the expected values.
 
 ### 3. Wire configuration, training, and replay
 
-Add one explicit parameter object to the training schema and dataclasses, then
-thread it through `repro.train._build_minimizer` and the corresponding builder
-in `repro.digits_validate`. Register the canonical name in the training loader,
-compact runner, output encoding choice, and the schema's `non_linearity`
-enumeration. A compact runner source must still provide a complete
-configuration; do not infer physical parameters from the nonlinearity name.
-Ship an audited JSON source when appropriate and select other sources by path
-with `--parameter-set`; add a legacy bundled alias only when it is needed for
-compatibility.
+Add each new physical or numerical field to the simulator-profile schema and
+dataclasses, then thread it through `repro.train._build_minimizer` and the
+corresponding builder in `repro.digits_validate`. Register the canonical name
+in the training loader, compact runner, output encoding choice, and the
+simulator schema's `non_linearity` enumeration. Add or adapt a training
+template that points to the new profile through `simulator_profile`; keep
+dataset, architecture, optimizer, fixed-sweep controls, and `seed` in the
+training template. Do not infer physical parameters from the nonlinearity
+name. Select sources by explicit path with `--parameter-set`; add a bundled
+alias only when compatibility requires it.
 
 Training and checkpoint replay must construct the same energy interaction,
-parameter scaling, updater, and numerical settings. Store every new setting in
-`config.generated.json`/`config.resolved.json`; archived replay configurations
-must remain readable, with a migration or explicit default if the new field is
-not conditionally optional. If the new law changes output orientation or
-pairing, update the cost selection and document checkpoint incompatibility.
+parameter scaling, updater, and numerical settings. The generated and resolved
+configs must embed the fully expanded settings and retain the simulator profile
+source/hash; archived replay configurations must remain readable, with a
+migration or explicit default if the new field is not conditionally optional.
+If the new law changes output orientation or pairing, update the cost selection
+and document checkpoint incompatibility.
 
 ### 4. Verify the extension
 

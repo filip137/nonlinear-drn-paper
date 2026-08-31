@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/simulator/schema.json",
+  "title": "Nonlinear DRN simulator profile",
+  "description": "Physical nonlinearity and equilibrium-solver settings composed into a dataset-specific training configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor-facing link to this JSON Schema; ignored by the runtime."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable purpose of this simulator profile."
+    },
+    "source": {
+      "type": "string",
+      "description": "Optional provenance note identifying the settings from which this profile was audited."
+    },
+    "non_linearity": {
+      "enum": ["single_diode_exponential", "double_diode_exponential", "experimental"],
+      "description": "Grounded nonlinear element: one Shockley diode, antiparallel double Shockley diode, or sampled/PWL I-V data."
+    },
+    "voltage_amp": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Inter-layer voltage-amplifier gain."
+    },
+    "current_amp": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Inter-layer current-amplifier gain."
+    },
+    "exponential_diode_param": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shockley parameters, required for the single- and double-diode nonlinearities.",
+      "properties": {
+        "I_s": {"type": "number", "exclusiveMinimum": 0},
+        "V_t": {"type": "number", "exclusiveMinimum": 0},
+        "V_off": {"type": "number"}
+      },
+      "required": ["I_s", "V_t", "V_off"]
+    },
+    "iv_data_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repository-relative or absolute .npz path containing either iv or paired i and v arrays; required for experimental/PWL."
+    },
+    "minimizer_impl": {"const": "custom"},
+    "mode": {"enum": ["asynchronous", "synchronous", "forward", "backward"]},
+    "single_diode_updater": {"enum": ["custom", "standard", "overrelaxed"]},
+    "double_diode_updater": {"enum": ["float64", "float32", "float64_overrelaxed", "float32_overrelaxed", "overrelaxed", "standard", "custom"]},
+    "overrelaxation_factor": {"type": "number", "exclusiveMinimum": 0},
+    "adaptive_equilibrium": {"const": false},
+    "rel_tol": {"type": "number", "exclusiveMinimum": 0},
+    "vn_tol": {"type": "number", "exclusiveMinimum": 0},
+    "use_polish": {"type": "boolean"},
+    "max_newton_iters": {"type": "integer", "minimum": 0},
+    "z_thresh": {"type": "number", "exclusiveMinimum": 1},
+    "exp_clip": {"type": "number", "exclusiveMinimum": 0},
+    "damping": {"type": "number", "exclusiveMinimum": 0},
+    "experimental_newton_max_steps": {"type": "integer", "minimum": 1},
+    "experimental_newton_tol": {"type": "number", "exclusiveMinimum": 0}
+  },
+  "required": [
+    "description",
+    "non_linearity",
+    "voltage_amp",
+    "current_amp",
+    "minimizer_impl",
+    "mode",
+    "single_diode_updater",
+    "double_diode_updater",
+    "overrelaxation_factor",
+    "adaptive_equilibrium",
+    "rel_tol",
+    "vn_tol",
+    "use_polish",
+    "max_newton_iters",
+    "z_thresh",
+    "exp_clip",
+    "damping",
+    "experimental_newton_max_steps",
+    "experimental_newton_tol"
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"non_linearity": {"const": "experimental"}}, "required": ["non_linearity"]},
+      "then": {"required": ["iv_data_path"]}
+    },
+    {
+      "if": {
+        "properties": {"non_linearity": {"enum": ["single_diode_exponential", "double_diode_exponential"]}},
+        "required": ["non_linearity"]
+      },
+      "then": {"required": ["exponential_diode_param"]}
+    }
+  ]
+}

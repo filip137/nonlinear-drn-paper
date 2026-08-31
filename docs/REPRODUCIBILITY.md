@@ -53,17 +53,33 @@ every optimizer step.
 Adaptive equilibrium is disabled for training so each phase performs the
 configured fixed number of coordinate-descent iterations.
 
-The three Digits configurations are compact functional examples. Each uses
-one hidden layer and four fixed coordinate-descent iterations. In the compact
-runner, omitting the Digits architecture inherits that one-hidden-layer source
-anchor; omitted iterations resolve to four for one hidden layer, eight for two
-or three, and the parameter source's value for four or more. Explicit
+The six editable defaults are split into dataset-specific training templates
+and reusable simulator profiles. Training templates hold data, architecture,
+initialization, optimizer, fixed-sweep, and seed settings; their
+`simulator_profile` points to the physical and solver settings under
+`configs/simulator/`. Seed intentionally remains training-side because it
+controls initialization, the data split, and loader order. All six defaults use
+batch size 10.
+
+The `default` alias resolves from both dataset and nonlinearity, although
+explicit training-template paths are preferred for provenance. At load time,
+the simulator profile is merged into the training configuration. Saved
+generated/resolved configurations are self-contained and record
+`simulator_profile_source` and `simulator_profile_sha256`.
+
+The three checked Digits paper configurations are compact functional examples.
+Each uses one hidden layer and four fixed coordinate-descent iterations. In the
+compact runner, omitting the Digits architecture inherits that one-hidden-layer
+source anchor; omitted iterations resolve to four for one hidden layer, eight
+for two or three, and the parameter source's value for four or more. Explicit
 `--num-iterations` values take precedence at every depth.
 
 A custom measured/PWL curve is a new experiment rather than a reproduction of
 the bundled measured-device result. The compact runner accepts it through
 `--iv-data-path`; the generated and resolved configurations retain the chosen
-path and whether it overrode the parameter-source curve. Accepted NPZ files
+path and whether it overrode the referenced simulator profile's curve. For a
+reusable change, copy `configs/simulator/default_pwl.json`, edit its
+`iv_data_path`, and point a copied training template at it. Accepted NPZ files
 contain equal-length 1-D `i`/`v` arrays or current-first `(2, N)` `iv` data
 with at least two real numeric, finite samples, strictly increasing voltage,
 and nondecreasing current.
@@ -88,3 +104,8 @@ while standalone seeds 0--3 define independent replication runs.
 Seeds fix parameter initialization, data splitting, and loader order. Floating
 point reductions and nonlinear solver trajectories can still vary slightly
 between CPU/GPU models and PyTorch builds.
+
+Only the double-Shockley MNIST settings have an audited paper basis. The
+editable `default_mnist_single_shockley.json` and
+`default_mnist_custom_iv.json` templates adapt validated Digits simulator
+profiles and define new experiments, not paper-MNIST reproductions.

@@ -1,8 +1,10 @@
 # Training configuration reference
 
-This document defines the complete JSON contract used by `configs/train/`,
-`repro.train`, and the compact runner in `repro.runner`. The machine-readable
-counterpart is [`configs/train/schema.json`](../configs/train/schema.json).
+This document defines the split JSON contract used by `configs/train/`,
+`configs/simulator/`, `repro.train`, and the compact runner in `repro.runner`.
+The machine-readable counterparts are
+[`configs/train/schema.json`](../configs/train/schema.json) and
+[`configs/simulator/schema.json`](../configs/simulator/schema.json).
 
 The checked paper configurations are scientific provenance records as well as
 executable inputs. Preserve their values when reproducing the paper. For a new
@@ -10,50 +12,78 @@ experiment, use the matching default parameter set or copy a default template
 to `configs/local/`, then inspect the expanded JSON with `--dry-run` before
 training.
 
-## Default templates and local changes
+## Composition and provenance
 
-Pass the matching JSON directly through `--parameter-set`:
+Each editable default is a training template containing the data, model,
+initialization, optimizer, and fixed-sweep training choices. Its
+`simulator_profile` is a repository-relative path to a second JSON file holding
+the nonlinearity, electrical, amplifier, and coordinate-solver settings. The
+loader merges the two before validation. A setting may not appear in both
+files.
 
-| Nonlinearity | Default template | Hidden width |
-|---|---|---:|
-| `single_diode_exponential` | `configs/train/default_single_shockley.json` | 100 |
-| `double_diode_exponential` | `configs/train/default_double_shockley.json` | 32 |
-| `experimental` (measured/PWL) | `configs/train/default_custom_iv.json` | 100 |
+The generated and resolved configurations saved beside each run are fully
+expanded and self-contained: the `simulator_profile` reference is replaced by
+the selected profile values. They also retain
+`simulator_profile_source` and `simulator_profile_sha256`, so the original
+profile path and exact bytes remain auditable.
 
-These sources are starting points for either Digits or MNIST. Their settings
-are derived from the checked Digits sources, but the width-100 single/PWL
-templates and any MNIST use are new experiments rather than paper results. The
-`configs/train/mnist_paper_double_shockley.json` source remains specific to the
-reported double-Shockley DRN-XS run.
+`seed` intentionally remains in the training template. It controls parameter
+initialization, dataset splitting, and loader order; it is not a property of
+the deterministic simulator.
+
+## Dataset-specific defaults and local changes
+
+Pass the training JSON matching both dataset and nonlinearity through
+`--parameter-set`:
+
+| Dataset | Nonlinearity | Training template | Simulator profile |
+|---|---|---|---|
+| Digits | `single_diode_exponential` | `configs/train/default_single_shockley.json` | `configs/simulator/default_single_shockley.json` |
+| Digits | `double_diode_exponential` | `configs/train/default_double_shockley.json` | `configs/simulator/default_double_shockley.json` |
+| Digits | `experimental` | `configs/train/default_custom_iv.json` | `configs/simulator/default_pwl.json` |
+| MNIST | `single_diode_exponential` | `configs/train/default_mnist_single_shockley.json` | `configs/simulator/default_single_shockley.json` |
+| MNIST | `double_diode_exponential` | `configs/train/default_mnist_double_shockley.json` | `configs/simulator/default_mnist_double_shockley.json` |
+| MNIST | `experimental` | `configs/train/default_mnist_custom_iv.json` | `configs/simulator/default_pwl.json` |
+
+All six defaults use batch size 10. Only double Shockley has audited MNIST
+paper parameters. The MNIST single-Shockley and PWL templates use
+Digits-derived simulator settings and are starting points for new experiments,
+not paper-MNIST results. Exact MNIST reproduction uses
+`configs/train/mnist_paper_double_shockley.json`.
+
+The `default` alias resolves by dataset and nonlinearity. Explicit JSON paths
+are preferred because the source is visible in the command. The paper aliases
+and `--parameter-config` path flag remain available for compatibility.
 
 Keep versioned templates unchanged. Put local variants under the git-ignored
-`configs/local/` directory and select the edited copy with
-`--parameter-set`:
+`configs/local/` directory:
 
 ```bash
 mkdir -p configs/local
-cp configs/train/default_single_shockley.json \
-  configs/local/my_single_shockley.json
-# Edit configs/local/my_single_shockley.json before running:
+cp configs/train/default_mnist_single_shockley.json \
+  configs/local/my_mnist_single.json
+# Edit configs/local/my_mnist_single.json before running:
 python scripts/train_drn.py \
   --dataset mnist \
   --non-linearity single \
-  --parameter-set configs/local/my_single_shockley.json \
+  --parameter-set configs/local/my_mnist_single.json \
   --dry-run
 ```
 
-Relative paths resolve from the repository root. The bundled parameter names
-and `--parameter-config` path flag remain available for legacy compatibility;
-new commands should use explicit JSON paths with `--parameter-set`.
+For a physical or solver change, copy the profile as well:
 
-The JSON `non_linearity` must match the runner selection. For measured/PWL
-sources, `iv_data_path` is the curve path stored in JSON; `--iv-data-path` is
-the compact runner override for one invocation. Relative curve paths resolve
-from the repository root.
+```bash
+cp configs/simulator/default_single_shockley.json \
+  configs/local/my_single_simulator.json
+```
+
+Then set the training copy's `simulator_profile` to
+`configs/local/my_single_simulator.json`. Profile references must stay inside
+the repository and are always interpreted relative to its root.
 
 ## Numerical settings at a glance
 
-The common schema deliberately records every supported solver family. A field
+The simulator-profile schema records every supported solver family. A field
 can therefore be present but inactive for a particular nonlinearity.
 
 | Setting | Single Shockley | Double Shockley | Measured/PWL | Fixed-sweep training |
@@ -70,9 +100,7 @@ can therefore be present but inactive for a particular nonlinearity.
 | `overrelaxation_factor` | active for `overrelaxed` | active for `*_overrelaxed` | active for `overrelaxed` | — |
 | `rel_tol`, `vn_tol` | — | — | — | inactive because `adaptive_equilibrium=false` |
 
-The inactive fields remain explicit so one configuration can be expanded by
-the high-level runner without silently inventing solver or device parameters.
-They do not change the selected updater's computation.
+Inactive profile fields do not change the selected updater's computation.
 
 ## Implementation map
 
@@ -207,10 +235,11 @@ The measured nonlinearity loads voltage and current samples from
 `iv_data_path`, interpolates each segment linearly, and solves the local
 current-balance equation iteratively.
 
-Set `iv_data_path` in a copied `default_custom_iv.json` when the curve belongs
-to that local parameter source. To leave the JSON unchanged or try another
-curve for one run, pass `--iv-data-path PATH`; the command-line value overrides
-the JSON field.
+Set `iv_data_path` in a copied `configs/simulator/default_pwl.json` when the
+curve belongs to a reusable local simulator profile, then point the copied
+Digits or MNIST training template at that profile. To leave the profile
+unchanged or try another curve for one run, pass `--iv-data-path PATH`; the
+command-line value overrides the profile field.
 
 The `.npz` file must contain either one-dimensional `i` and `v` arrays of equal
 length, or one `iv` array shaped `(2, N)` with current in row 0 and voltage in
@@ -238,10 +267,10 @@ runs.
 
 ## Equilibrium iteration settings
 
-Training requires `adaptive_equilibrium=false`. Every free and nudged phase
-therefore performs exactly `num_iterations` coordinate-descent sweeps. This is
-important for reproducing the paper's computational budget and gradient
-estimator.
+Training requires the simulator profile's `adaptive_equilibrium=false`. Every
+free and nudged phase therefore performs exactly the training template's
+`num_iterations` coordinate-descent sweeps. This is important for reproducing
+the paper's computational budget and gradient estimator.
 
 When `num_iterations` is omitted from the compact runner, Digits uses four
 sweeps for one hidden layer, eight for two or three, and the selected parameter
@@ -255,9 +284,10 @@ depth defaults.
 max_abs_voltage_change <= rel_tol * max_abs_previous_voltage + vn_tol.
 ```
 
-They are retained in training configurations for compatibility with numerical
-replay but are inactive during training. They must not be interpreted as a
-claim that the fixed-sweep training phases converged to those tolerances.
+They are retained in simulator profiles and expanded configurations for
+compatibility with numerical replay but are inactive during training. They must
+not be interpreted as a claim that the fixed-sweep training phases converged to
+those tolerances.
 
 ## Updater and ordering fields
 
@@ -274,39 +304,40 @@ it and can accelerate or destabilize convergence depending on the network.
 The checked paper values should be used for reproduction rather than assumed
 to transfer to arbitrary architectures.
 
-## Architecture and electrical fields
+## Training-template fields
 
 | Field | Meaning |
 |---|---|
+| `simulator_profile` | Repository-relative path to the physical/solver profile; required by editable split templates. |
+| `dataset` | Digits or MNIST selection, subset controls, and normalization. |
 | `layer_shapes` | Input, hidden, and output tensor shapes. Inputs are duplicated into positive/negative channels. |
 | `weight_gains` | One conductance-initialization gain per connection between adjacent layers. |
 | `weight_min`, `weight_max` | Conductance bounds enforced after every optimizer update. |
 | `weight_init_mode` | Conductance initialization rule. |
 | `input_gain` | Input multiplier after preprocessing and signed duplication. |
-| `voltage_amp`, `current_amp` | Inter-layer amplifier factors used by the electrical model. |
-| `quadratic_diode_param` | Explicit compatibility parameters for finite-conductance/idealized diode models. |
-| `exponential_diode_param.I_s` | Shockley reverse saturation current in simulator electrical units. |
-| `exponential_diode_param.V_t` | Shockley thermal-voltage scale. |
-| `exponential_diode_param.V_off` | Voltage offset or turn-on shift. |
-| `hard_sigmoid_param` | Explicit compatibility parameters for hard-sigmoid models. |
-| `iv_data_path` | Measured/PWL `.npz` source containing 1-D `i` and `v`, or `(2, N)` `iv` in current-then-voltage order; relative paths resolve from the repository root. |
-
-All three physical parameter dictionaries are mandatory even when inactive.
-This fail-closed contract prevents a configuration from silently acquiring
-invented diode values when it is reused with another nonlinearity.
-
-## Training fields
-
-| Field | Meaning |
-|---|---|
-| `dataset` | Digits or MNIST selection, subset controls, and normalization. |
 | `batch_size` | Mini-batch size. |
 | `num_epochs` | Complete passes over the training split. |
+| `num_iterations` | Fixed coordinate-descent sweeps per free or nudged phase. |
 | `learning_rates` | Optimizer rates in conductance-tensor order followed by hidden-bias order. |
 | `scheduler_gamma` | Multiplicative rate decay after each epoch; `1` disables decay. |
 | `nudging` | Magnitude of the equilibrium-propagation perturbation. |
 | `ep_variant` | Positive, negative, or centered equilibrium-propagation estimator. |
-| `seed` | Initialization, split, and loader-order seed. |
+| `seed` | Initialization, data-split, and loader-order seed; intentionally training-side rather than simulator-side. |
+
+## Simulator-profile fields
+
+| Field | Meaning |
+|---|---|
+| `non_linearity` | Canonical grounded-element choice. It must match the runner's requested nonlinearity. |
+| `voltage_amp`, `current_amp` | Inter-layer amplifier factors used by the electrical model. |
+| `exponential_diode_param.I_s` | Shockley reverse saturation current in simulator electrical units. |
+| `exponential_diode_param.V_t` | Shockley thermal-voltage scale. |
+| `exponential_diode_param.V_off` | Voltage offset or turn-on shift. |
+| `iv_data_path` | Measured/PWL `.npz` source containing 1-D `i` and `v`, or `(2, N)` `iv` in current-then-voltage order; relative paths resolve from the repository root. |
+| `mode`, updater selectors, and `overrelaxation_factor` | Coordinate-update ordering and updater choice. |
+| `adaptive_equilibrium`, `rel_tol`, `vn_tol` | Equilibrium stopping policy; adaptive equilibrium must be false for training. |
+| `z_thresh`, `exp_clip`, `use_polish`, `max_newton_iters` | Shockley numerical controls. |
+| `damping`, `experimental_newton_max_steps`, `experimental_newton_tol` | Measured/PWL Newton controls. |
 
 For `H` hidden layers, the dense runner expects `H+1` conductance rates followed
 by `H` hidden-bias rates, for `2H+1` values total. The MNIST paper preset's
@@ -314,15 +345,18 @@ effective ordering is documented separately in `docs/MNIST_REPRODUCTION.md`.
 
 ## Validation and archived configurations
 
-The runtime rejects non-positive tolerances and clip values, `z_thresh <= 1`,
-negative Shockley polish counts, non-positive measured/PWL step limits,
-malformed or nonmonotone I-V data, and training configurations that enable
-adaptive equilibrium. Error messages state the expected format before
-reporting the provided value.
+The runtime rejects unknown or duplicate simulator-profile fields, profile
+references outside the repository, non-positive tolerances and clip values,
+`z_thresh <= 1`, negative Shockley polish counts, non-positive measured/PWL
+step limits, malformed or nonmonotone I-V data, and training configurations
+that enable adaptive equilibrium. Error messages state the expected format
+before reporting the provided value.
 
 The JSON files below `data/error_vs_iter/configs/` and
 `data/timing/configs/` are archived numerical-replay records rather than
 editable training templates. They may contain historical instrumentation keys
 such as `dynamic_polish` or Anderson-acceleration settings. Only fields loaded
 by `repro.config.RuntimeConfig` affect standalone replay; the extra keys are
-retained for provenance.
+retained for provenance. Historical replay records can also retain legacy
+`quadratic_diode_param` and `hard_sigmoid_param` fields; neither belongs in the
+current split training templates.

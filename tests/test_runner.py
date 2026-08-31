@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from repro import DRNRunSpec, build_training_config, run_drn
-from repro.runner import main
+from repro.runner import _run_summary, main
 from repro.train import load_training_config
 
 
@@ -50,9 +50,10 @@ def test_runner_builds_each_paper_nonlinearity(
     assert config["adaptive_equilibrium"] is False
     assert config["runner"]["hidden_sizes_source"] == "user"
     assert config["runner"]["num_iterations_source"] == "digits-depth-default"
-    assert config["quadratic_diode_param"]
-    assert config["exponential_diode_param"]
-    assert config["hard_sigmoid_param"]
+    if canonical != "experimental":
+        assert config["exponential_diode_param"]
+    assert "quadratic_diode_param" not in config
+    assert "hard_sigmoid_param" not in config
     schema = json.loads(
         (ROOT / "configs" / "train" / "schema.json").read_text(encoding="utf-8")
     )
@@ -92,7 +93,7 @@ def test_runner_inherits_one_hidden_layer_digits_anchors(
     ("name", "expected_hidden_width", "output_width"),
     [
         ("single", 100, 10),
-        ("double", 32, 20),
+        ("double", 100, 20),
         ("pwl", 100, 20),
     ],
 )
@@ -117,6 +118,33 @@ def test_default_parameter_set_supports_every_nonlinearity_on_mnist(
         [output_width],
     ]
     assert config["runner"]["parameter_source"].startswith("parameter-set:default")
+    assert config["batch_size"] == 10
+    assert config["simulator_profile_source"].startswith("configs/simulator/")
+    assert len(config["simulator_profile_sha256"]) == 64
+
+
+@pytest.mark.parametrize(
+    ("dataset", "name", "expected_source"),
+    [
+        ("digits", "single", "configs/train/default_single_shockley.json"),
+        ("mnist", "single", "configs/train/default_mnist_single_shockley.json"),
+    ],
+)
+def test_default_parameter_set_is_dataset_specific(
+    dataset: str,
+    name: str,
+    expected_source: str,
+) -> None:
+    config = build_training_config(
+        DRNRunSpec(
+            dataset=dataset,
+            non_linearity=name,
+            parameter_set="default",
+        ),
+        repo_root=ROOT,
+    )
+
+    assert expected_source in config["runner"]["parameter_source"]
 
 
 def test_incompatible_paper_parameter_set_lists_working_alternatives() -> None:
@@ -150,6 +178,10 @@ def test_parameter_set_accepts_a_configuration_path() -> None:
 
     assert config["layer_shapes"] == [[2, 28, 28], [100], [10]]
     assert config["runner"]["parameter_source"] == str(source.relative_to(ROOT))
+    assert config["batch_size"] == 10
+    summary = _run_summary(config)
+    assert "Batch size: 10" in summary
+    assert "Simulator profile: configs/simulator/default_single_shockley.json" in summary
 
 
 @pytest.mark.parametrize(
@@ -448,6 +480,9 @@ def test_runner_dry_run_prints_resolved_config_without_training(capsys: pytest.C
     assert printed["num_iterations"] == 4
     assert printed["runner"]["parameter_source"] == (
         "configs/train/default_double_shockley.json"
+    )
+    assert printed["simulator_profile_source"] == (
+        "configs/simulator/default_double_shockley.json"
     )
     assert printed["runner"]["hidden_sizes_source"] == "parameter-source"
     assert printed["runner"]["num_iterations_source"] == "digits-depth-default"
