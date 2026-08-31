@@ -34,9 +34,9 @@ Pass the template matching both the dataset and nonlinearity directly to
 
 | Dataset | CLI nonlinearity | Training template | Hidden width | Referenced simulator profile |
 |---|---|---|---:|---|
-| Digits | `single` | `default_single_shockley.json` | 100 | `configs/simulator/default_single_shockley.json` |
+| Digits | `single` | `default_single_shockley.json` | 32 | `configs/simulator/default_single_shockley.json` |
 | Digits | `double` | `default_double_shockley.json` | 32 | `configs/simulator/default_double_shockley.json` |
-| Digits | `pwl` | `default_custom_iv.json` | 100 | `configs/simulator/default_pwl.json` |
+| Digits | `pwl` | `default_custom_iv.json` | 32 | `configs/simulator/default_pwl.json` |
 | MNIST | `single` | `default_mnist_single_shockley.json` | 100 | `configs/simulator/default_single_shockley.json` |
 | MNIST | `double` | `default_mnist_double_shockley.json` | 100 | `configs/simulator/default_mnist_double_shockley.json` |
 | MNIST | `pwl` | `default_mnist_custom_iv.json` | 100 | `configs/simulator/default_pwl.json` |

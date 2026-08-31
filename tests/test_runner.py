@@ -176,7 +176,7 @@ def test_parameter_set_accepts_a_configuration_path() -> None:
         repo_root=ROOT,
     )
 
-    assert config["layer_shapes"] == [[2, 28, 28], [100], [10]]
+    assert config["layer_shapes"] == [[2, 28, 28], [32], [10]]
     assert config["runner"]["parameter_source"] == str(source.relative_to(ROOT))
     assert config["batch_size"] == 10
     summary = _run_summary(config)

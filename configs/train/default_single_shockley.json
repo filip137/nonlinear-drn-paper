@@ -7,7 +7,7 @@
     "num_samples": null,
     "train_fraction": 0.8
   },
-  "layer_shapes": [[128], [100], [10]],
+  "layer_shapes": [[128], [32], [10]],
   "simulator_profile": "configs/simulator/default_single_shockley.json",
   "weight_gains": [1.0, 1.0],
   "weight_min": 1e-7,

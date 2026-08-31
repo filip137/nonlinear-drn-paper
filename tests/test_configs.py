@@ -39,9 +39,9 @@ def test_training_configs_cover_all_paper_nonlinearities() -> None:
 
 def test_editable_defaults_are_dataset_specific_and_composed() -> None:
     cases = [
-        ("default_single_shockley.json", "digits", "single_diode_exponential", 100),
+        ("default_single_shockley.json", "digits", "single_diode_exponential", 32),
         ("default_double_shockley.json", "digits", "double_diode_exponential", 32),
-        ("default_custom_iv.json", "digits", "experimental", 100),
+        ("default_custom_iv.json", "digits", "experimental", 32),
         (
             "default_mnist_single_shockley.json",
             "mnist",

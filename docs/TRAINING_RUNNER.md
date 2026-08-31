@@ -139,9 +139,9 @@ template references a simulator profile for its physical and solver settings:
 
 | Dataset | Nonlinearity | Training template | Hidden width | Simulator profile |
 |---|---|---|---:|---|
-| Digits | single Shockley | `default_single_shockley.json` | 100 | `default_single_shockley.json` |
+| Digits | single Shockley | `default_single_shockley.json` | 32 | `default_single_shockley.json` |
 | Digits | double Shockley | `default_double_shockley.json` | 32 | `default_double_shockley.json` |
-| Digits | measured/PWL | `default_custom_iv.json` | 100 | `default_pwl.json` |
+| Digits | measured/PWL | `default_custom_iv.json` | 32 | `default_pwl.json` |
 | MNIST | single Shockley | `default_mnist_single_shockley.json` | 100 | `default_single_shockley.json` |
 | MNIST | double Shockley | `default_mnist_double_shockley.json` | 100 | `default_mnist_double_shockley.json` |
 | MNIST | measured/PWL | `default_mnist_custom_iv.json` | 100 | `default_pwl.json` |
