@@ -7,15 +7,15 @@ on:
 jobs:
   test:
     name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -28,4 +28,4 @@ jobs:
       - name: Run tests
         run: python -m pytest
       - name: Replay one bundled checkpoint
-        run: python scripts/reproduce.py validate --group error_vs_iter --limit 1 --device cpu
+        run: python scripts/reproduce.py validate --group error_vs_iter --limit 1

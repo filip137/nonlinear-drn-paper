@@ -56,7 +56,9 @@ class CostFunction(ABC):
         output = self._get_output()  # the output layer's state
         device = output.device  # device on which the output layer Tensor is, and on which we put the layer and target Tensors
         self._label = label.to(device)
-        self._target = F.one_hot(self._label, num_classes=self._num_classes).type(torch.float32)  # convert the label into its one-hot code
+        self._target = F.one_hot(
+            self._label, num_classes=self._num_classes
+        ).to(device=device, dtype=output.dtype)
 
     def error_fn(self):
         """Returns the error value for the current output configuration.
@@ -207,7 +209,9 @@ class SquaredErrorPairedOutputs(CostFunction, QFunction):
         output = self._get_output()  # the output layer's state
         device = output.device  # device on which the output layer Tensor is, and on which we put the layer and target Tensors
         self._label = label.to(device)
-        self._target = F.one_hot(self._label, num_classes=self._num_classes).type(torch.float32)  # convert the label into its one-hot code
+        self._target = F.one_hot(
+            self._label, num_classes=self._num_classes
+        ).to(device=device, dtype=output.dtype)
 
     def _scores(self, y: torch.Tensor) -> torch.Tensor:
         B, N = y.shape

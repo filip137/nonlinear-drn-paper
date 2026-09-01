@@ -1,0 +1,224 @@
+{
+  "$id": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/manifest-v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "fileReference": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "not": {
+            "pattern": "(^/|(^|/)\\.\\.(/|$))"
+          },
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "job": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "additionalProperties": false,
+          "properties": {
+            "reference_states": {
+              "$ref": "#/$defs/fileReference"
+            },
+            "weights": {
+              "$ref": "#/$defs/fileReference"
+            }
+          },
+          "required": [
+            "weights"
+          ],
+          "type": "object"
+        },
+        "base_config": {
+          "$ref": "#/$defs/fileReference"
+        },
+        "group": {
+          "enum": [
+            "error_vs_iter",
+            "timing",
+            "vol_tol"
+          ]
+        },
+        "job_id": {
+          "minLength": 1,
+          "not": {
+            "pattern": "(^/|(^|/)\\.\\.(/|$))"
+          },
+          "type": "string"
+        },
+        "overrides": {
+          "additionalProperties": false,
+          "properties": {
+            "equilibrium": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "sweeps": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "sweeps"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "max_sweeps": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "max_sweeps"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "equilibrium"
+          ],
+          "type": "object"
+        },
+        "provenance": {
+          "additionalProperties": false,
+          "properties": {
+            "source_run": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "variant": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_run"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "assets",
+        "base_config",
+        "group",
+        "job_id",
+        "overrides",
+        "provenance"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "created_by": {
+      "const": "scripts/migrate_replay_configs.py"
+    },
+    "demo": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_size": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "job_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "batch_size",
+        "job_id"
+      ],
+      "type": "object"
+    },
+    "comparison": {
+      "additionalProperties": false,
+      "properties": {
+        "policy_version": {"const": 1},
+        "relative_error_epsilon": {"type": "number", "exclusiveMinimum": 0},
+        "percentiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "number", "minimum": 0, "maximum": 100}
+        },
+        "percentile_method": {"const": "linear"},
+        "accumulation_dtype": {"const": "float64"},
+        "reference_data_fingerprint": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+        "reference_split_fingerprint": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+      },
+      "required": [
+        "policy_version",
+        "relative_error_epsilon",
+        "percentiles",
+        "percentile_method",
+        "accumulation_dtype",
+        "reference_data_fingerprint",
+        "reference_split_fingerprint"
+      ],
+      "type": "object"
+    },
+    "description": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "execution_ref": {
+      "$ref": "#/$defs/fileReference"
+    },
+    "jobs": {
+      "items": {
+        "$ref": "#/$defs/job"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "kind": {
+      "const": "replay_manifest"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 2
+    }
+  },
+  "required": [
+    "created_by",
+    "comparison",
+    "demo",
+    "description",
+    "execution_ref",
+    "jobs",
+    "kind",
+    "name",
+    "notes",
+    "schema_version"
+  ],
+  "title": "Strict nonlinear-DRN replay manifest",
+  "type": "object"
+}

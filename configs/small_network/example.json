@@ -1,0 +1,96 @@
+{
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/small-network-v2.schema.json",
+  "schema_version": 2,
+  "kind": "small_network",
+  "description": "Editable deterministic two-layer hand-specified network.",
+  "network": {
+    "seed": 0,
+    "state_dtype": "float32",
+    "input_gain": 1.0,
+    "input_encoding": "direct",
+    "bias": {"method": "none"},
+    "layer_sizes": [2, 4, 2],
+    "conductances": [
+      [
+        [1.0, 0.2, 0.8, 0.4],
+        [0.3, 1.1, 0.5, 0.9]
+      ],
+      [
+        [0.8, 0.2],
+        [0.4, 1.0],
+        [1.1, 0.3],
+        [0.2, 0.7]
+      ]
+    ],
+    "input_voltages": [
+      [0.2, -0.1],
+      [0.7, 0.3],
+      [-0.4, 0.8]
+    ]
+  },
+  "simulation": {
+    "nonlinearity": "double_diode_exponential",
+    "physical": {
+      "saturation_current": 1e-6,
+      "thermal_voltage": 0.05,
+      "offset_voltage": 0.8
+    },
+    "amplification": {
+      "voltage_factor": 4.0,
+      "current_factor": 1.0
+    },
+    "updater": {
+      "method": "lambert_w_v1",
+      "backend": "torchlambertw",
+      "dtype": "float64",
+      "relaxation": 1.2,
+      "linear_coefficient_clamp": 1e6,
+      "exponent_clip": 165.0,
+      "asymptotic_threshold": 1e10,
+      "asymptotic_terms": 4,
+      "polish": false
+    }
+  },
+    "equilibrium": {
+    "initial_state": "zeros",
+    "method": "voltage_change",
+    "update_order": "asynchronous",
+    "max_sweeps": 128,
+    "relative_tolerance": 1e-5,
+    "absolute_tolerance": 1e-6
+  },
+  "execution": {
+    "name": "reference_cpu",
+    "backend": {
+      "construction_device": "cpu",
+      "device": "cpu",
+      "default_dtype": "float32"
+    },
+    "determinism": {
+      "float32_matmul_precision": "highest",
+      "torch_deterministic_algorithms": true,
+      "warn_only": false
+    },
+    "threads": {
+      "torch_intraop": 1,
+      "torch_interop": 1,
+      "omp": 1,
+      "blas": 1
+    },
+    "dataloader": {
+      "num_workers": 0,
+      "persistent_workers": false,
+      "pin_memory": false,
+      "prefetch_factor": null,
+      "timeout_seconds": 0.0
+    },
+    "seeding": {
+      "python": "config_seed",
+      "numpy": "config_seed",
+      "torch": "config_seed"
+    }
+  },
+  "provenance": {
+    "source": "Public hand-specified network example."
+  }
+}

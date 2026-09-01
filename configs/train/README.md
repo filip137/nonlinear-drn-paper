@@ -1,123 +1,78 @@
-# Training configurations
+# Training configuration sources
 
-The JSON files in this directory include reusable starting-point templates and
-the checked parameter sources used for paper reproduction. They share the
-editor-aware [`schema.json`](schema.json). Editors that understand JSON Schema
-display a field's definition and allowed values when hovering over it.
+Every JSON file in this directory is a complete, strict version-2 training
+source. The machine-readable contract is
+[`../schema/training-v2.schema.json`](../schema/training-v2.schema.json).
+Unknown fields, numeric strings, non-finite numbers, missing values, and inline
+simulator or execution settings are rejected.
 
-For equations, units, numerical tradeoffs, field applicability, and guidance
-for changing solver values, read
-[`docs/CONFIG_REFERENCE.md`](../../docs/CONFIG_REFERENCE.md).
+## Single ownership
 
-## Training templates and simulator profiles
+A training source owns exactly four scientific sections:
 
-The six editable defaults deliberately separate two kinds of choices:
+- `data`: dataset identity, preprocessing, subset/split policy, and seed;
+- `model`: shapes, dtype, initialization, bounds, bias and signed-weight policy,
+  output encoding, and loss;
+- `training`: loader behavior, batch limits, equilibrium propagation, optimizer,
+  scheduler timing, and checkpoint policy; and
+- `equilibrium`: zero initialization, coordinate-update order, and the fixed
+  sweep budget used for every free and nudged training phase.
 
-- `configs/train/default*.json` contains dataset preprocessing, architecture,
-  weight initialization and bounds, optimizer settings, fixed-sweep training
-  controls, and `seed`.
-- Its `simulator_profile` field points to a file under `configs/simulator/`
-  containing the nonlinearity, electrical parameters, amplifier settings, and
-  coordinate-updater controls.
+It refers to, but does not duplicate, the other owners:
 
-The seed stays in the training template because it controls parameter
-initialization, the data split, and loader order rather than the deterministic
-device law. Loading a template merges its simulator profile before validation.
-The generated and resolved configurations saved with a run are fully expanded
-and self-contained, and record both `simulator_profile_source` and
-`simulator_profile_sha256`.
+- `simulation_ref` names an exact file under `configs/simulator/`; and
+- `execution_ref` names an exact deterministic profile under
+  `configs/execution/`.
 
-## Dataset-specific defaults
+Both references contain a repository-relative path and the SHA-256 of the
+referenced file bytes. Resolution fails if the file is missing or its bytes no
+longer match. The resolver validates each source before composition, rejects
+section collisions, validates the fully expanded configuration, and executes
+that expanded snapshot.
 
-Pass the template matching both the dataset and nonlinearity directly to
-`--parameter-set`:
+## Bundled sources
 
-| Dataset | CLI nonlinearity | Training template | Hidden width | Referenced simulator profile |
-|---|---|---|---:|---|
-| Digits | `single` | `default_single_shockley.json` | 32 | `configs/simulator/default_single_shockley.json` |
-| Digits | `double` | `default_double_shockley.json` | 32 | `configs/simulator/default_double_shockley.json` |
-| Digits | `pwl` | `default_custom_iv.json` | 32 | `configs/simulator/default_pwl.json` |
-| MNIST | `single` | `default_mnist_single_shockley.json` | 100 | `configs/simulator/default_single_shockley.json` |
-| MNIST | `double` | `default_mnist_double_shockley.json` | 100 | `configs/simulator/default_mnist_double_shockley.json` |
-| MNIST | `pwl` | `default_mnist_custom_iv.json` | 100 | `configs/simulator/default_pwl.json` |
+| File | Dataset | Hidden width | Batch | Epochs | Simulator |
+|---|---|---:|---:|---:|---|
+| `default_single_shockley.json` | Digits | 32 | 10 | 15 | single Shockley |
+| `default_double_shockley.json` | Digits | 32 | 10 | 15 | double Shockley |
+| `default_custom_iv.json` | Digits | 32 | 10 | 15 | measured/PWL |
+| `default_mnist_single_shockley.json` | MNIST | 100 | 10 | 15 | single Shockley |
+| `default_mnist_double_shockley.json` | MNIST | 100 | 10 | 100 | double Shockley |
+| `default_mnist_custom_iv.json` | MNIST | 100 | 10 | 15 | measured/PWL |
+| `digits_single_shockley.json` | Digits | 64 | 10 | 15 | paper single Shockley |
+| `digits_double_shockley.json` | Digits | 32 | 32 | 15 | paper double Shockley |
+| `digits_pwl.json` | Digits | 32 | 32 | 15 | paper measured/PWL |
+| `mnist_paper_double_shockley.json` | MNIST | 100 | 16 | 100 | paper DRN-XS |
 
-All six defaults use batch size 10; `--batch-size` overrides it for one run.
-Only the double-Shockley MNIST settings have an audited paper basis. The MNIST
-single-Shockley and PWL templates adapt validated Digits settings and are
-starting points for new experiments, not paper-MNIST results. Use
-`mnist_paper_double_shockley.json`, not the editable MNIST double default, for
-the exact reported DRN-XS protocol.
+The four paper sources now use the same reference mechanism as the editable
+defaults; simulator values are no longer copied inline. The paper MNIST outcome
+summary remains under `provenance.expected_results` and is never read by the
+scientific runtime.
 
-The alias `--parameter-set default` resolves by both dataset and nonlinearity,
-but explicit JSON paths are preferred because they make the selected training
-source visible in the command. Relative paths resolve from the repository
-root. The `paper-digits` and `paper-mnist-xs` aliases and the
-`--parameter-config` path flag remain available for compatibility.
+## Making a variant
 
-## Make local changes
+Do not edit a bundled source for a one-off experiment. Generate a new complete
+configuration under the git-ignored `configs/local/` directory and record
+changes as JSON-Pointer overrides. Scientific command-line overrides are a
+configuration-generation step: the expanded file is written before training,
+then training receives only that validated file.
 
-Keep the bundled defaults unchanged. Copy the matching training template into
-the git-ignored `configs/local/` directory, edit the copy, and pass its path to
-`--parameter-set`:
+If a simulator setting changes, copy the simulator profile too and update both
+`simulation_ref.path` and `simulation_ref.sha256`. If the execution policy
+changes, create or select a versioned execution profile and update both fields
+of `execution_ref`. A path without its matching hash is deliberately invalid.
 
-```bash
-mkdir -p configs/local
-cp configs/train/default_mnist_single_shockley.json \
-  configs/local/my_mnist_single.json
-# Edit configs/local/my_mnist_single.json, then run:
-python scripts/train_drn.py \
-  --dataset mnist \
-  --non-linearity single \
-  --parameter-set configs/local/my_mnist_single.json \
-  --device cuda \
-  --download
-```
-
-Changing architecture, learning rate, batch size, dataset preprocessing, or
-seed requires only the copied training file. To change physical or solver
-settings, also copy its referenced simulator profile:
+The migration used for the bundled records is reproducible and idempotent:
 
 ```bash
-cp configs/simulator/default_single_shockley.json \
-  configs/local/my_single_simulator.json
+python scripts/migrate_training_configs.py
 ```
 
-Then set `simulator_profile` in `configs/local/my_mnist_single.json` to
-`configs/local/my_single_simulator.json`. Profile references must be
-repository-relative paths that stay inside the repository.
-
-For a reusable measured/PWL setup, copy `default_mnist_custom_iv.json` (or the
-Digits `default_custom_iv.json`) and `configs/simulator/default_pwl.json`, set
-the copied training file's `simulator_profile` to the copied profile, and edit
-`iv_data_path` in that profile. For a one-run curve override, leave the profile
-unchanged and add `--iv-data-path path/to/curve.npz`.
-
-## Checked paper configurations
-
-| File | Dataset | Architecture / fixed sweeps | Active nonlinear updater |
-|---|---|---|---|
-| `digits_single_shockley.json` | Digits | width 64 / 4 | single-Shockley Lambert-W |
-| `digits_double_shockley.json` | Digits | width 32 / 4 | double-Shockley float64 Lambert-W with overrelaxation |
-| `digits_pwl.json` | Digits | width 32 / 4 | measured/PWL damped Newton |
-| `mnist_paper_double_shockley.json` | MNIST | width 100 / 4 | paper DRN-XS float64 Lambert-W |
-
-These are reproduction records rather than editable defaults. Preserve their
-values when reproducing the paper.
-
-JSON does not support comments. Keep explanatory text in the schemas and
-reference rather than adding ad hoc keys. Use
-`python scripts/train_drn.py ... --dry-run` to inspect the fully expanded
-configuration before launching a run.
-
-For the compact runner, omitting `--hidden-sizes` inherits the selected
-training source's architecture. Digits then defaults to four iterations for one
-hidden layer and eight for two or three hidden layers. With four or more it
-retains the training source's iteration count. An explicit `--num-iterations`
-always takes precedence.
-
-A measured curve NPZ must contain equal-length, one-dimensional `i` and `v`
-arrays, or an `iv` array shaped exactly `(2, N)` with current first. At least
-two real numeric, finite samples are required; voltage must be strictly
-increasing and current must be nondecreasing. See
-[`docs/ADDING_NONLINEARITY.md`](../../docs/ADDING_NONLINEARITY.md) for the full
-sampled-data contract and analytic-extension guide.
+It migrates simulator profiles first, embeds their resulting hashes in the ten
+training sources, validates every nested reference and all fourteen files
+against the version-2 schemas, and produces identical bytes when rerun.
+`provenance.migration` records the tool and schema transition;
+`provenance.materialized_defaults` names the exact formerly implicit fields
+materialized for that dataset and family. Scientific runtime code never reads
+those provenance records.

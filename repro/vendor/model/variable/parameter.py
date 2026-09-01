@@ -35,7 +35,10 @@ class Parameter(Variable, ABC):
 
         Variable.__init__(self, shape)
 
-        self._state = torch.empty(*shape, dtype=torch.float32, device=device)
+        # The execution profile sets PyTorch's default dtype before model
+        # construction.  Honor it so a validated model.state_dtype is the
+        # single authority for parameters as well as layers and inputs.
+        self._state = torch.empty(*shape, device=device)
         self._non_negative = non_negative
 
         self.min_cond = min_cond
@@ -71,28 +74,41 @@ class Bias(Parameter):
 
     _counter = 0
 
-    def __init__(self, shape, gain, device):
+    def __init__(
+        self,
+        shape,
+        initial_value,
+        device,
+        *,
+        minimum=0.0,
+        maximum=None,
+    ):
         """Initializes an instance of Bias
 
         Args:
             shape (tuple of ints): Shape of the bias Tensor. Type is float32.
         """
 
-        Parameter.__init__(self, shape, device=device)
+        Parameter.__init__(
+            self,
+            shape,
+            device=device,
+            non_negative=False,
+            min_cond=minimum,
+            max_cond=maximum,
+        )
 
-        self.init_state(gain)
+        self.init_state(initial_value)
+        self.clamp_()
 
         self.name = 'Bias_{}'.format(Bias._counter)
 
         Bias._counter += 1
 
-    def init_state(self, gain):
-        """Initializes the bias tensor to zero, i.e. b=0."""
+    def init_state(self, value):
+        """Initialize every bias to the explicitly selected constant."""
 
-        # TODO: implement recommended initialization schemes for biases, instead of zero
-
-        # torch.nn.init.constant_(self._state, 0.)
-        torch.nn.init.uniform_(self._state, -gain, +gain)
+        torch.nn.init.constant_(self._state, value)
 
 
 class DenseWeight(Parameter):

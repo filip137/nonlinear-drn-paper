@@ -303,8 +303,61 @@ class Function(ABC):
 
         # FIXME: the parameters of the Readout cost function won't be loaded
 
-        params = torch.load(path, map_location=torch.device(self._device))
-        for param, state in zip(self._params, params): param.state = state
+        states = torch.load(
+            path,
+            map_location=torch.device(self._device),
+            weights_only=True,
+        )
+        if not isinstance(states, (list, tuple)):
+            raise ValueError(
+                "Expected checkpoint payload to be a list or tuple of parameter tensors. "
+                f"Provided value: {type(states).__name__}."
+            )
+        if len(states) != len(self._params):
+            raise ValueError(
+                "Expected checkpoint parameter count to match the constructed model "
+                f"exactly: expected {len(self._params)}, got {len(states)}."
+            )
+
+        # Validate the complete checkpoint before assigning any tensor. A
+        # partial or malformed checkpoint must never leave random parameters in
+        # an otherwise apparently loaded model.
+        for index, (param, state) in enumerate(zip(self._params, states)):
+            if not isinstance(state, torch.Tensor):
+                raise ValueError(
+                    f"Expected checkpoint parameter {index} to be a tensor. "
+                    f"Provided value: {type(state).__name__}."
+                )
+            if tuple(state.shape) != tuple(param.state.shape):
+                raise ValueError(
+                    f"Expected checkpoint parameter {index} shape "
+                    f"{tuple(param.state.shape)}, got {tuple(state.shape)}."
+                )
+            if state.dtype != param.state.dtype:
+                raise ValueError(
+                    f"Expected checkpoint parameter {index} dtype "
+                    f"{param.state.dtype}, got {state.dtype}."
+                )
+            if not torch.isfinite(state).all():
+                raise ValueError(
+                    f"Expected checkpoint parameter {index} to contain only finite values."
+                )
+            minimum = param.min_cond
+            maximum = param.max_cond
+            if minimum is None and getattr(param, "_non_negative", False):
+                minimum = 0.0
+            if minimum is not None and torch.any(state < minimum):
+                raise ValueError(
+                    f"Expected checkpoint parameter {index} to satisfy its configured "
+                    f"minimum {minimum}."
+                )
+            if maximum is not None and torch.any(state > maximum):
+                raise ValueError(
+                    f"Expected checkpoint parameter {index} to satisfy its configured "
+                    f"maximum {maximum}."
+                )
+        for param, state in zip(self._params, states):
+            param.state = state.detach()
 
 
 

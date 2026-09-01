@@ -1,817 +1,126 @@
-"""Scellier-style high-level runner for nonlinear DRN training experiments.
-
-The paper artifact keeps JSON configurations for exact replay.  This module
-adds the compact experiment interface used by the original fast-DRN examples:
-describe a dataset, architecture, learning rate, and nonlinearity in one place,
-then launch the run with a single function call.  Every launch still writes the
-fully expanded JSON configuration into its output directory.
-"""
+"""Thin resolve-then-run interface for training configurations."""
 
 from __future__ import annotations
 
 import argparse
-import copy
-import json
-import math
-import re
 import sys
-import time
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
-
-PAPER_NONLINEARITIES = (
-    "single_diode_exponential",
-    "double_diode_exponential",
-    "experimental",
-)
-
-NONLINEARITY_ALIASES = {
-    "single": "single_diode_exponential",
-    "single-shockley": "single_diode_exponential",
-    "single_diode_exponential": "single_diode_exponential",
-    "double": "double_diode_exponential",
-    "double-shockley": "double_diode_exponential",
-    "double_diode_exponential": "double_diode_exponential",
-    "pwl": "experimental",
-    "measured": "experimental",
-    "experimental": "experimental",
-}
-
-# A parameter set is an explicit choice: it supplies the physical diode
-# parameters and nonlinear-solver settings.  ``default`` is dataset-aware;
-# the paper aliases remain fixed, audited sources.
-DEFAULT_PARAMETER_SOURCES: dict[str, dict[str, str]] = {
-    "digits": {
-        "single_diode_exponential": "configs/train/default_single_shockley.json",
-        "double_diode_exponential": "configs/train/default_double_shockley.json",
-        "experimental": "configs/train/default_custom_iv.json",
-    },
-    "mnist": {
-        "single_diode_exponential": "configs/train/default_mnist_single_shockley.json",
-        "double_diode_exponential": "configs/train/default_mnist_double_shockley.json",
-        "experimental": "configs/train/default_mnist_custom_iv.json",
-    },
-}
-
-PARAMETER_SETS: dict[str, dict[str, str]] = {
-    "paper-digits": {
-        "single_diode_exponential": "configs/train/digits_single_shockley.json",
-        "double_diode_exponential": "configs/train/digits_double_shockley.json",
-        "experimental": "configs/train/digits_pwl.json",
-    },
-    "paper-mnist-xs": {
-        "double_diode_exponential": "configs/train/mnist_paper_double_shockley.json",
-    },
-}
-
-SHORT_NAMES = {
-    "single_diode_exponential": "single-shockley",
-    "double_diode_exponential": "double-shockley",
-    "experimental": "pwl",
-}
-
-
-@dataclass(frozen=True)
-class DRNRunSpec:
-    """Readable definition of one dense nonlinear-DRN training run.
-
-    ``parameter_set`` accepts either a bundled name or a JSON configuration
-    path. ``parameter_config`` remains as a legacy path alias; the two are
-    mutually exclusive. One must be supplied so that physical diode parameters
-    are always explicit.
-    When ``hidden_sizes`` is omitted, the selected parameter source supplies
-    its anchor architecture. When ``learning_rate`` or ``input_gain`` is
-    omitted, that source supplies its configured value and preserves its
-    weight/bias policy when the depth changes. A scalar learning rate is
-    expanded over all dense weights and hidden-layer biases. A sequence must
-    contain either one value or exactly ``2H + 1`` values for ``H`` hidden
-    layers. ``iv_data_path`` is valid only for the measured/PWL nonlinearity;
-    when supplied, it replaces the curve from the selected parameter source.
-    """
-
-    dataset: str
-    hidden_sizes: Sequence[int] | None = None
-    # The empty default preserves the original positional field order while
-    # build_training_config still requires a recognized nonlinearity.
-    non_linearity: str = ""
-    learning_rate: float | Sequence[float] | None = None
-    parameter_set: str | Path | None = None
-    parameter_config: str | Path | None = None
-    epochs: int | None = None
-    batch_size: int | None = None
-    num_iterations: int | None = None
-    nudging: float | None = None
-    input_gain: float | None = None
-    voltage_amp: float | None = None
-    current_amp: float | None = None
-    weight_gain: float = 1.0
-    seed: int | None = None
-    digits_num_samples: int | None = None
-    digits_train_fraction: float = 0.8
-    mnist_root: str = "data/external/mnist"
-    mnist_train_samples: int | None = None
-    mnist_test_samples: int | None = None
-    iv_data_path: str | Path | None = None
+from repro.strict_config import pretty_json_text
 
 
 def build_training_config(
-    spec: DRNRunSpec,
+    source: str | Path | Mapping[str, Any],
     *,
     repo_root: Path | None = None,
+    overrides: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Expand a compact run specification into a validated training config."""
+    """Return a fully expanded v2 snapshot with no implicit experiment policy."""
 
     root = _resolve_repo_root(repo_root)
-    dataset = _canonical_dataset(spec.dataset)
-    non_linearity = _canonical_non_linearity(spec.non_linearity)
-    if spec.iv_data_path is not None and non_linearity != "experimental":
-        raise ValueError(
-            "Expected iv_data_path to be used only with the measured/PWL "
-            f"nonlinearity. Provided non_linearity: {spec.non_linearity!r}."
-        )
-    source_path, source_label = _resolve_parameter_source(
-        root,
-        dataset,
-        non_linearity,
-        parameter_set=spec.parameter_set,
-        parameter_config=spec.parameter_config,
-    )
-
     _ensure_vendor_path(root)
-    from repro.train import load_training_config
+    from repro.train import resolve_training_config
 
-    source_config, source = load_training_config(source_path, repo_root=root)
-    source_non_linearity = _canonical_non_linearity(str(source["non_linearity"]))
-    if source_non_linearity != non_linearity:
-        raise ValueError(
-            f"Expected parameter source non_linearity to be {non_linearity!r}. "
-            f"Provided value: {source_non_linearity!r} from {source_path}."
-        )
-    hidden_sizes, hidden_sizes_source = _resolve_hidden_sizes(
-        spec.hidden_sizes,
-        source_config.layer_shapes,
-        non_linearity,
-    )
+    return resolve_training_config(
+        source,
+        repo_root=root,
+        overrides=overrides,
+    ).document
 
-    config = copy.deepcopy(source)
-    config.pop("expected_results", None)
-    config.pop("source", None)
-    config["description"] = (
-        "Generated by the Scellier-style runner for "
-        f"{dataset}, {SHORT_NAMES[non_linearity]}, hidden sizes {list(hidden_sizes)}."
-    )
-    config["dataset"] = _dataset_config(spec, dataset)
-    config["layer_shapes"] = _layer_shapes(dataset, hidden_sizes, non_linearity)
-    config["non_linearity"] = non_linearity
-    config["weight_gains"] = [float(spec.weight_gain)] * (len(hidden_sizes) + 1)
-    learning_rates, learning_rate_source = _resolve_learning_rates(
-        spec.learning_rate,
-        source.get("learning_rates"),
-        hidden_layer_count=len(hidden_sizes),
-        source_hidden_layer_count=len(source_config.layer_shapes) - 2,
-    )
-    config["learning_rates"] = learning_rates
-    config["adaptive_equilibrium"] = False
-    _apply_optional_override(config, "num_epochs", spec.epochs, integer=True)
-    _apply_optional_override(config, "batch_size", spec.batch_size, integer=True)
-    num_iterations, num_iterations_source = _resolve_num_iterations(
-        spec.num_iterations,
-        source_config.num_iterations,
-        dataset=dataset,
-        hidden_layer_count=len(hidden_sizes),
-    )
-    config["num_iterations"] = num_iterations
-    _apply_optional_override(config, "nudging", spec.nudging)
-    _apply_optional_override(config, "input_gain", spec.input_gain)
-    _apply_optional_override(config, "voltage_amp", spec.voltage_amp)
-    _apply_optional_override(config, "current_amp", spec.current_amp)
-    _apply_optional_override(config, "seed", spec.seed, integer=True)
-    iv_data_source: str | None = None
-    if non_linearity == "experimental":
-        configured_iv_path = (
-            spec.iv_data_path
-            if spec.iv_data_path is not None
-            else config.get("iv_data_path")
-        )
-        if not isinstance(configured_iv_path, (str, Path)) or not str(
-            configured_iv_path
-        ).strip():
-            raise ValueError(
-                "Expected the measured/PWL parameter source to define 'iv_data_path' "
-                "or iv_data_path to be supplied by the user. "
-                f"Provided value: {configured_iv_path!r}."
-            )
-        resolved_iv_path = _resolve_input_path(root, configured_iv_path)
-        from repro.iv_data import load_iv_data
 
-        load_iv_data(resolved_iv_path, use_environment_override=False)
-        config["iv_data_path"] = _relative_or_absolute(resolved_iv_path, root)
-        iv_data_source = (
-            "user" if spec.iv_data_path is not None else "parameter-source"
-        )
-    config["runner"] = {
-        "interface": "repro.runner.DRNRunSpec",
-        "parameter_source": source_label,
-        "dataset": dataset,
-        "hidden_sizes": list(hidden_sizes),
-        "hidden_sizes_source": hidden_sizes_source,
-        "learning_rate_argument": _json_number_or_list(spec.learning_rate),
-        "learning_rate_source": learning_rate_source,
-        "input_gain_source": "user" if spec.input_gain is not None else "parameter-source",
-        "num_iterations_source": num_iterations_source,
-        "non_linearity_argument": spec.non_linearity,
-        "adaptive_equilibrium": False,
-    }
-    if iv_data_source is not None:
-        config["runner"]["iv_data_source"] = iv_data_source
+def write_training_config(
+    source: str | Path | Mapping[str, Any],
+    destination: str | Path,
+    *,
+    repo_root: Path | None = None,
+    overrides: Sequence[str] = (),
+) -> Path:
+    """Materialize a complete executable config before numerical work."""
 
-    _validate_positive("weight_gain", spec.weight_gain)
-    if non_linearity != "experimental":
-        field = "exponential_diode_param"
-        if not isinstance(config.get(field), dict) or not config[field]:
-            raise ValueError(
-                f"Expected parameter source '{field}' to be a non-empty object. "
-                f"Provided value: {config.get(field)!r}."
-            )
-    return config
+    root = _resolve_repo_root(repo_root)
+    document = build_training_config(
+        source,
+        repo_root=root,
+        overrides=overrides,
+    )
+    path = Path(destination).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(pretty_json_text(document), encoding="utf-8")
+    return path
 
 
 def run_drn(
-    spec: DRNRunSpec,
+    config: str | Path,
     *,
     repo_root: Path | None = None,
-    device: str = "cpu",
     output_dir: str | Path | None = None,
+    overrides: Sequence[str] = (),
     download: bool = False,
-    max_batches: int | None = None,
-    max_eval_batches: int | None = None,
 ):
-    """Build and run one experiment, returning ``repro.train.TrainingResult``.
+    """Train from one source/snapshot; all scientific edits are recorded overrides."""
 
-    The generated configuration is saved as ``config.generated.json`` beside
-    the checkpoints before training starts.
-    """
-
-    from repro.cli import configure_environment
-
-    configure_environment()
     root = _resolve_repo_root(repo_root)
-    config = build_training_config(spec, repo_root=root)
-    run_dir = _resolve_output_dir(root, config, output_dir)
-    if run_dir.exists() and not run_dir.is_dir():
-        raise NotADirectoryError(
-            "Expected output_dir to be absent or an empty directory. "
-            f"Provided value: {run_dir}."
-        )
-    if run_dir.exists() and any(run_dir.iterdir()):
-        raise FileExistsError(
-            "Expected output_dir to be absent or empty. "
-            f"Provided value: {run_dir}."
-        )
-    run_dir.mkdir(parents=True, exist_ok=True)
-    generated_config = run_dir / "config.generated.json"
-    generated_config.write_text(
-        json.dumps(config, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
     _ensure_vendor_path(root)
     from repro.train import run_training
 
+    output = None if output_dir is None else Path(output_dir)
     return run_training(
         root,
-        generated_config,
-        device=device,
-        output_dir=run_dir,
-        max_batches=max_batches,
-        max_eval_batches=max_eval_batches,
+        Path(config),
+        output_dir=output,
+        overrides=overrides,
         download=download,
     )
 
 
-def create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Define and train a dense nonlinear DRN using the compact "
-            "Scellier-style experiment interface."
-        )
-    )
-    parser.add_argument("--dataset", choices=("digits", "mnist"), required=True)
-    parser.add_argument(
-        "--hidden-sizes",
-        type=int,
-        nargs="+",
-        default=None,
-        metavar="N",
-        help=(
-            "Hidden-layer widths, e.g. --hidden-sizes 128 64. "
-            "Defaults to the parameter source's one-hidden-layer anchor."
-        ),
-    )
-    parser.add_argument(
-        "--learning-rate",
-        type=float,
-        nargs="+",
-        default=None,
-        metavar="LR",
-        help=(
-            "One shared rate, or one rate per weight/bias parameter. "
-            "Defaults to the rate in the selected training source."
-        ),
-    )
-    parser.add_argument(
-        "--non-linearity",
-        required=True,
-        metavar="NAME",
-        help=(
-            "single, double, or pwl; canonical names such as "
-            "double_diode_exponential are also accepted."
-        ),
-    )
-    source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument(
-        "--parameter-set",
-        metavar="NAME_OR_PATH",
-        help=(
-            "Training JSON file (optionally referencing a simulator profile), "
-            "or a bundled "
-            f"alias: {', '.join(sorted((*PARAMETER_SETS, 'default')))}."
-        ),
-    )
-    source.add_argument(
-        "--parameter-config",
-        type=Path,
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--iv-data-path",
-        type=Path,
-        default=None,
-        help=(
-            "Custom measured I-V .npz curve for pwl/experimental runs. "
-            "Relative paths resolve from the repository root."
-        ),
-    )
-    parser.add_argument("--epochs", type=int, default=None)
-    parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument(
-        "--num-iterations",
-        type=int,
-        default=None,
-        help=(
-            "Coordinate-descent sweeps per phase. For Digits, defaults to 4 "
-            "with one hidden layer, 8 with two or three hidden layers, and "
-            "the parameter-source value with four or more."
-        ),
-    )
-    parser.add_argument("--nudging", type=float, default=None)
-    parser.add_argument(
-        "--input-gain",
-        type=float,
-        default=None,
-        help="Override the input gain in the selected training source.",
-    )
-    parser.add_argument("--voltage-amp", type=float, default=None)
-    parser.add_argument("--current-amp", type=float, default=None)
-    parser.add_argument("--weight-gain", type=float, default=1.0)
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--digits-num-samples", type=int, default=None)
-    parser.add_argument("--digits-train-fraction", type=float, default=0.8)
-    parser.add_argument("--mnist-root", default="data/external/mnist")
-    parser.add_argument("--mnist-train-samples", type=int, default=None)
-    parser.add_argument("--mnist-test-samples", type=int, default=None)
-    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
-    parser.add_argument("--output", type=Path, default=None)
-    parser.add_argument("--max-batches", type=int, default=None)
-    parser.add_argument("--max-eval-batches", type=int, default=None)
-    parser.add_argument(
-        "--download",
-        action="store_true",
-        help="Allow torchvision to download MNIST into --mnist-root.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the fully expanded configuration without training or writing files.",
-    )
-    return parser
-
-
-def main(argv: Sequence[str] | None = None, *, repo_root: Path | None = None) -> int:
-    args = create_parser().parse_args(argv)
-    learning_rate: float | Sequence[float] | None
-    if args.learning_rate is None:
-        learning_rate = None
-    elif len(args.learning_rate) == 1:
-        learning_rate = args.learning_rate[0]
-    else:
-        learning_rate = tuple(args.learning_rate)
-    spec = DRNRunSpec(
-        dataset=args.dataset,
-        hidden_sizes=None if args.hidden_sizes is None else tuple(args.hidden_sizes),
-        learning_rate=learning_rate,
-        non_linearity=args.non_linearity,
-        parameter_set=args.parameter_set,
-        parameter_config=args.parameter_config,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        num_iterations=args.num_iterations,
-        nudging=args.nudging,
-        input_gain=args.input_gain,
-        voltage_amp=args.voltage_amp,
-        current_amp=args.current_amp,
-        weight_gain=args.weight_gain,
-        seed=args.seed,
-        digits_num_samples=args.digits_num_samples,
-        digits_train_fraction=args.digits_train_fraction,
-        mnist_root=args.mnist_root,
-        mnist_train_samples=args.mnist_train_samples,
-        mnist_test_samples=args.mnist_test_samples,
-        iv_data_path=args.iv_data_path,
-    )
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+) -> int:
     root = _resolve_repo_root(repo_root)
-    config = build_training_config(spec, repo_root=root)
-    if args.dry_run:
-        print(json.dumps(config, indent=2, sort_keys=True))
+    parser = argparse.ArgumentParser(
+        description="Resolve and train strict nonlinear-DRN v2 configurations."
+    )
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="JSON_POINTER=JSON_VALUE",
+    )
+    parser.add_argument(
+        "--write-config",
+        type=Path,
+        help="Resolve and write the complete snapshot without training.",
+    )
+    parser.add_argument("--download", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.write_config is not None:
+        path = write_training_config(
+            args.config,
+            args.write_config,
+            repo_root=root,
+            overrides=args.override,
+        )
+        print(f"resolved_config: {path}")
         return 0
-
-    print(_run_summary(config))
     result = run_drn(
-        spec,
+        args.config,
         repo_root=root,
-        device=args.device,
         output_dir=args.output,
+        overrides=args.override,
         download=args.download,
-        max_batches=args.max_batches,
-        max_eval_batches=args.max_eval_batches,
     )
-    print(f"training output: {result.output_dir}")
+    print(f"training_output: {result.output_dir}")
     return 0
-
-
-def _canonical_dataset(value: str) -> str:
-    key = str(value).strip().lower()
-    if key not in {"digits", "mnist"}:
-        raise ValueError(
-            "Expected dataset to be 'digits' or 'mnist'. "
-            f"Provided value: {value!r}."
-        )
-    return key
-
-
-def _canonical_non_linearity(value: str) -> str:
-    key = str(value).strip().lower().replace(" ", "-")
-    if key not in NONLINEARITY_ALIASES:
-        expected = ", ".join(PAPER_NONLINEARITIES)
-        raise ValueError(
-            f"Expected non_linearity to identify one of {expected}. "
-            f"Provided value: {value!r}."
-        )
-    return NONLINEARITY_ALIASES[key]
-
-
-def _validate_hidden_sizes(values: Sequence[int], non_linearity: str) -> tuple[int, ...]:
-    if isinstance(values, (str, bytes)):
-        raise ValueError(
-            "Expected hidden_sizes to be a non-empty sequence of positive integers. "
-            f"Provided value: {values!r}."
-        )
-    sizes = tuple(int(value) for value in values)
-    if not sizes or any(value <= 0 for value in sizes):
-        raise ValueError(
-            "Expected hidden_sizes to be a non-empty sequence of positive integers. "
-            f"Provided value: {list(values)!r}."
-        )
-    if non_linearity == "single_diode_exponential" and any(value % 2 for value in sizes):
-        raise ValueError(
-            "Expected every single-Shockley hidden size to be even so forward- and "
-            f"reverse-oriented nodes can be paired. Provided value: {list(sizes)!r}."
-        )
-    return sizes
-
-
-def _resolve_hidden_sizes(
-    value: Sequence[int] | None,
-    source_layer_shapes: Sequence[Sequence[int]],
-    non_linearity: str,
-) -> tuple[tuple[int, ...], str]:
-    if value is not None:
-        return _validate_hidden_sizes(value, non_linearity), "user"
-
-    hidden_shapes = tuple(
-        tuple(int(width) for width in shape)
-        for shape in source_layer_shapes[1:-1]
-    )
-    if not hidden_shapes or any(len(shape) != 1 for shape in hidden_shapes):
-        raise ValueError(
-            "Expected the parameter source to define at least one dense hidden layer "
-            "when hidden_sizes is omitted. "
-            f"Provided value: {list(source_layer_shapes)!r}."
-        )
-    sizes = tuple(shape[0] for shape in hidden_shapes)
-    return _validate_hidden_sizes(sizes, non_linearity), "parameter-source"
-
-
-def _resolve_num_iterations(
-    value: int | None,
-    source_value: int,
-    *,
-    dataset: str,
-    hidden_layer_count: int,
-) -> tuple[int, str]:
-    if value is not None:
-        resolved = int(value)
-        if resolved <= 0:
-            raise ValueError(
-                "Expected num_iterations to be positive. "
-                f"Provided value: {value!r}."
-            )
-        return resolved, "user"
-    if dataset == "digits":
-        if hidden_layer_count == 1:
-            return 4, "digits-depth-default"
-        if hidden_layer_count in {2, 3}:
-            return 8, "digits-depth-default"
-    return int(source_value), "parameter-source"
-
-
-def _resolve_parameter_source(
-    root: Path,
-    dataset: str,
-    non_linearity: str,
-    *,
-    parameter_set: str | Path | None,
-    parameter_config: str | Path | None,
-) -> tuple[Path, str]:
-    supplied = int(parameter_set is not None) + int(parameter_config is not None)
-    if supplied != 1:
-        raise ValueError(
-            "Expected exactly one of parameter_set or parameter_config. "
-            f"Provided value: parameter_set={parameter_set!r}, "
-            f"parameter_config={parameter_config!r}."
-        )
-    if parameter_set is not None:
-        parameter_source = str(parameter_set)
-        if parameter_source == "default":
-            choices = DEFAULT_PARAMETER_SOURCES[dataset]
-            relative = choices[non_linearity]
-            path = root / relative
-            label = f"parameter-set:default ({relative})"
-        elif parameter_source in PARAMETER_SETS:
-            choices = PARAMETER_SETS[parameter_source]
-            if non_linearity not in choices:
-                compatible_sets = ("default",) + tuple(
-                    name
-                    for name, supported in PARAMETER_SETS.items()
-                    if non_linearity in supported
-                )
-                raise ValueError(
-                    f"Expected parameter_set {parameter_source!r} to support "
-                    f"{non_linearity!r}; supported nonlinearities are {tuple(choices)}. "
-                    f"Provided value: {non_linearity!r}. Compatible bundled parameter "
-                    f"sets are {compatible_sets}; use one of them with any dataset, or "
-                    "pass a matching JSON path to --parameter-set. A cross-dataset "
-                    "combination is a new experiment, not a paper reproduction."
-                )
-            relative = choices[non_linearity]
-            path = root / relative
-            label = f"parameter-set:{parameter_source} ({relative})"
-        else:
-            path = Path(parameter_source).expanduser()
-            if not path.is_absolute():
-                path = root / path
-            label = _relative_or_absolute(path.resolve(), root)
-    else:
-        path = Path(str(parameter_config)).expanduser()
-        if not path.is_absolute():
-            path = root / path
-        label = _relative_or_absolute(path.resolve(), root)
-    path = path.resolve()
-    if not path.is_file():
-        raise FileNotFoundError(
-            "Expected parameter source to be an existing JSON file. "
-            f"Provided value: {path}."
-        )
-    return path, label
-
-
-def _dataset_config(spec: DRNRunSpec, dataset: str) -> dict[str, Any]:
-    if dataset == "digits":
-        if not 0.0 < float(spec.digits_train_fraction) < 1.0:
-            raise ValueError(
-                "Expected digits_train_fraction to lie strictly between zero and one. "
-                f"Provided value: {spec.digits_train_fraction!r}."
-            )
-        if spec.digits_num_samples is not None and int(spec.digits_num_samples) <= 1:
-            raise ValueError(
-                "Expected digits_num_samples to be greater than one or None. "
-                f"Provided value: {spec.digits_num_samples!r}."
-            )
-        return {
-            "name": "digits",
-            "num_samples": spec.digits_num_samples,
-            "train_fraction": float(spec.digits_train_fraction),
-        }
-
-    for name, value in (
-        ("mnist_train_samples", spec.mnist_train_samples),
-        ("mnist_test_samples", spec.mnist_test_samples),
-    ):
-        if value is not None and int(value) <= 0:
-            raise ValueError(
-                f"Expected {name} to be positive or None. Provided value: {value!r}."
-            )
-    return {
-        "name": "mnist",
-        "root": spec.mnist_root,
-        "normalize": True,
-        "normalize_mean": 0.1307,
-        "normalize_standard_deviation": 0.3081,
-        "normalize_scale": 0.3,
-        "train_samples": spec.mnist_train_samples,
-        "test_samples": spec.mnist_test_samples,
-    }
-
-
-def _layer_shapes(
-    dataset: str,
-    hidden_sizes: tuple[int, ...],
-    non_linearity: str,
-) -> list[list[int]]:
-    input_shape = [128] if dataset == "digits" else [2, 28, 28]
-    output_shape = [10] if non_linearity == "single_diode_exponential" else [20]
-    return [input_shape, *[[width] for width in hidden_sizes], output_shape]
-
-
-def _resolve_learning_rates(
-    value: float | Sequence[float] | None,
-    source_value: Any,
-    *,
-    hidden_layer_count: int,
-    source_hidden_layer_count: int,
-) -> tuple[list[float], str]:
-    parameter_count = 2 * hidden_layer_count + 1
-    if value is None:
-        if not isinstance(source_value, list) or not source_value:
-            raise ValueError(
-                "Expected the parameter source to provide a non-empty "
-                f"'learning_rates' list. Provided value: {source_value!r}."
-            )
-        source_rates = [float(rate) for rate in source_value]
-        if all(rate == source_rates[0] for rate in source_rates):
-            value = source_rates[0]
-        elif len(source_rates) == parameter_count:
-            value = source_rates
-        else:
-            source_parameter_count = 2 * source_hidden_layer_count + 1
-            if len(source_rates) != source_parameter_count:
-                raise ValueError(
-                    "Expected the parameter source learning_rates length to match its "
-                    f"{source_hidden_layer_count} hidden layers. "
-                    f"Provided source value: {source_rates!r}."
-                )
-            source_weight_rates = source_rates[: source_hidden_layer_count + 1]
-            source_bias_rates = source_rates[source_hidden_layer_count + 1 :]
-            uniform_weights = all(
-                rate == source_weight_rates[0] for rate in source_weight_rates
-            )
-            uniform_biases = not source_bias_rates or all(
-                rate == source_bias_rates[0] for rate in source_bias_rates
-            )
-            if not uniform_weights or not uniform_biases:
-                # The paper MNIST anchor has one hidden layer and distinct
-                # input/output conductance rates. For a resized network,
-                # preserve the input role once, reuse the output/downstream
-                # rate for later conductances, and reuse the hidden-bias rate.
-                if source_hidden_layer_count == 1 and uniform_biases:
-                    bias_rate = source_bias_rates[0] if source_bias_rates else 0.0
-                    value = (
-                        [source_weight_rates[0]]
-                        + [source_weight_rates[-1]] * hidden_layer_count
-                        + [bias_rate] * hidden_layer_count
-                    )
-                else:
-                    raise ValueError(
-                        "Expected an explicit learning_rate when resizing a parameter "
-                        "source whose layerwise rate policy cannot be preserved. "
-                        f"Provided source value: {source_rates!r} for "
-                        f"{hidden_layer_count} hidden layers."
-                    )
-            else:
-                bias_rate = source_bias_rates[0] if source_bias_rates else 0.0
-                value = (
-                    [source_weight_rates[0]] * (hidden_layer_count + 1)
-                    + [bias_rate] * hidden_layer_count
-                )
-        rate_source = "parameter-source"
-    else:
-        rate_source = "user"
-
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        rates = [float(value)] * parameter_count
-    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        supplied = [float(rate) for rate in value]
-        if len(supplied) == 1:
-            rates = supplied * parameter_count
-        elif len(supplied) == parameter_count:
-            rates = supplied
-        else:
-            raise ValueError(
-                f"Expected learning_rate to contain one value or {parameter_count} values "
-                f"for {hidden_layer_count} hidden layers. Provided value: {supplied!r}."
-            )
-    else:
-        raise ValueError(
-            "Expected learning_rate to be a number or a sequence of numbers. "
-            f"Provided value: {value!r}."
-        )
-    if any(not math.isfinite(rate) or rate < 0.0 for rate in rates) or not any(
-        rate > 0.0 for rate in rates
-    ):
-        raise ValueError(
-            "Expected finite, non-negative learning rates with at least one positive value. "
-            f"Provided value: {rates!r}."
-        )
-    return rates, rate_source
-
-
-def _apply_optional_override(
-    config: dict[str, Any],
-    field: str,
-    value: int | float | None,
-    *,
-    integer: bool = False,
-) -> None:
-    if value is None:
-        return
-    resolved: int | float = int(value) if integer else float(value)
-    if field == "seed" and resolved < 0:
-        raise ValueError(
-            f"Expected seed to be non-negative. Provided value: {value!r}."
-        )
-    if field != "seed" and resolved <= 0:
-        raise ValueError(
-            f"Expected {field} to be positive. Provided value: {value!r}."
-        )
-    config[field] = resolved
-
-
-def _validate_positive(name: str, value: float) -> None:
-    if not math.isfinite(float(value)) or float(value) <= 0.0:
-        raise ValueError(
-            f"Expected {name} to be a positive finite number. Provided value: {value!r}."
-        )
-
-
-def _resolve_output_dir(
-    root: Path,
-    config: dict[str, Any],
-    output_dir: str | Path | None,
-) -> Path:
-    if output_dir is not None:
-        path = Path(output_dir).expanduser()
-        return path.resolve() if path.is_absolute() else (root / path).resolve()
-    hidden = "x".join(str(shape[0]) for shape in config["layer_shapes"][1:-1])
-    non_linearity = str(config["non_linearity"])
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    suffix = f"{time.time_ns() % 1_000_000_000:09d}"
-    name = _safe_component(
-        f"{config['dataset']['name']}_{SHORT_NAMES[non_linearity]}_h{hidden}_{stamp}-{suffix}"
-    )
-    return root / "outputs" / "training" / "runner" / name
-
-
-def _resolve_input_path(root: Path, value: str | Path) -> Path:
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        path = root / path
-    return path.resolve()
-
-
-def _run_summary(config: dict[str, Any]) -> str:
-    runner = config["runner"]
-    lines = [
-        f"Dataset: {config['dataset']['name']}",
-        f"Network: {config['layer_shapes']}",
-        f"Nonlinearity: {config['non_linearity']}",
-        (
-            f"Learning rates: {config['learning_rates']} "
-            f"({runner['learning_rate_source']})"
-        ),
-        f"Input gain: {config['input_gain']} ({runner['input_gain_source']})",
-        f"Batch size: {config['batch_size']}",
-        "Adaptive equilibrium during training: false",
-        f"Parameter source: {runner['parameter_source']}",
-    ]
-    simulator_source = config.get("simulator_profile_source")
-    if simulator_source is not None:
-        lines.append(f"Simulator profile: {simulator_source}")
-    lines.append(
-        f"Epochs: {config['num_epochs']} | iterations: {config['num_iterations']}"
-    )
-    return "\n".join(lines)
 
 
 def _resolve_repo_root(repo_root: Path | None) -> Path:
@@ -826,26 +135,12 @@ def _ensure_vendor_path(root: Path) -> None:
         sys.path.insert(0, vendor)
 
 
-def _json_number_or_list(
-    value: float | Sequence[float] | None,
-) -> float | list[float] | None:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return [float(item) for item in value]
+__all__ = [
+    "build_training_config",
+    "run_drn",
+    "write_training_config",
+]
 
 
-def _safe_component(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "run"
-
-
-def _relative_or_absolute(path: Path, root: Path) -> str:
-    try:
-        return str(path.relative_to(root))
-    except ValueError:
-        return str(path)
-
-
-if __name__ == "__main__":  # pragma: no cover - use scripts/train_drn.py
+if __name__ == "__main__":
     raise SystemExit(main())

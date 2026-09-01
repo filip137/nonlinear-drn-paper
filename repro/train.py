@@ -1,12 +1,12 @@
+"""Strict, deterministic equilibrium-propagation training."""
+
 from __future__ import annotations
 
-import hashlib
 import json
 import math
-import platform
-import random
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -18,95 +18,154 @@ from torch.utils.data import DataLoader, Subset, TensorDataset, random_split
 
 from model.function.cost import SquaredError, SquaredErrorPairedOutputs
 from model.function.network import Network
-from model.resistive.minimizer import MinimizerSettings, QuadraticMinimizer
 from model.resistive.network import DeepResistiveEnergy
-from repro.device import resolve_device
-from repro.iv_data import load_iv_data
+from repro.execution import (
+    apply_execution_profile,
+    dataloader_kwargs,
+    seed_from_config,
+    validate_execution_relations,
+)
+from repro.minimizer_factory import build_minimizer, simulation_assets
+from repro.provenance import build_run_receipt, sha256_arrays, sha256_file
+from repro.strict_config import (
+    CompositionResult,
+    ConfigurationOverrideError,
+    JsonPointerOverride,
+    apply_json_pointer_overrides,
+    pretty_json_text,
+    resolve_config_source,
+    validate_document,
+)
 from training.sgd import AugmentedFunction, EquilibriumProp
 
 
-PAPER_NONLINEARITIES = (
-    "single_diode_exponential",
-    "double_diode_exponential",
-    "experimental",
-)
-
-_SIMULATOR_PROFILE_FIELDS = frozenset(
-    {
-        "non_linearity",
-        "voltage_amp",
-        "current_amp",
-        "exponential_diode_param",
-        "iv_data_path",
-        "minimizer_impl",
-        "mode",
-        "single_diode_updater",
-        "double_diode_updater",
-        "overrelaxation_factor",
-        "adaptive_equilibrium",
-        "rel_tol",
-        "vn_tol",
-        "use_polish",
-        "max_newton_iters",
-        "z_thresh",
-        "exp_clip",
-        "damping",
-        "experimental_newton_max_steps",
-        "experimental_newton_tol",
-    }
-)
-_SIMULATOR_PROFILE_METADATA_FIELDS = frozenset({"$schema", "description", "source"})
-_LEGACY_UNUSED_TRAINING_FIELDS = frozenset(
-    {"quadratic_diode_param", "hard_sigmoid_param"}
-)
+_TORCH_DTYPES = {
+    "float32": torch.float32,
+    "float64": torch.float64,
+}
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    description: str
-    dataset: dict[str, Any]
-    layer_shapes: list[tuple[int, ...]]
-    non_linearity: str
-    weight_gains: list[float]
-    weight_min: float
-    weight_max: float
-    weight_init_mode: str
-    input_gain: float
-    voltage_amp: float
-    current_amp: float
-    exponential_diode_param: dict[str, Any]
-    batch_size: int
-    num_epochs: int
-    num_iterations: int
-    learning_rates: list[float]
-    scheduler_gamma: float
-    nudging: float
-    ep_variant: str
-    minimizer_impl: str
-    mode: str
-    single_diode_updater: str
-    double_diode_updater: str
-    overrelaxation_factor: float
-    adaptive_equilibrium: bool
-    rel_tol: float
-    vn_tol: float
-    use_polish: bool
-    max_newton_iters: int
-    z_thresh: float
-    exp_clip: float
-    damping: float
-    experimental_newton_max_steps: int
-    experimental_newton_tol: float
-    seed: int
-    iv_data_path: str | None
+    """Typed view over a fully expanded, schema-validated training document."""
+
+    document: dict[str, Any]
+
+    @property
+    def description(self) -> str:
+        return self.document["description"]
+
+    @property
+    def dataset(self) -> dict[str, Any]:
+        return self.document["data"]
+
+    @property
+    def model(self) -> dict[str, Any]:
+        return self.document["model"]
+
+    @property
+    def training(self) -> dict[str, Any]:
+        return self.document["training"]
+
+    @property
+    def simulation(self) -> dict[str, Any]:
+        return self.document["simulation"]
+
+    @property
+    def equilibrium(self) -> dict[str, Any]:
+        return self.document["equilibrium"]
+
+    @property
+    def execution(self) -> dict[str, Any]:
+        return self.document["execution"]
+
+    @property
+    def layer_shapes(self) -> list[tuple[int, ...]]:
+        return [tuple(shape) for shape in self.model["layer_shapes"]]
+
+    @property
+    def non_linearity(self) -> str:
+        return self.simulation["nonlinearity"]
+
+    @property
+    def weight_gains(self) -> list[float]:
+        return list(self.model["weight_gains"])
+
+    @property
+    def weight_min(self) -> float:
+        return self.model["weight_bounds"]["minimum"]
+
+    @property
+    def weight_max(self) -> float:
+        return self.model["weight_bounds"]["maximum"]
+
+    @property
+    def weight_init_mode(self) -> str:
+        return self.model["weight_initialization"]
+
+    @property
+    def input_gain(self) -> float:
+        return self.model["input_gain"]
+
+    @property
+    def voltage_amp(self) -> float:
+        return self.simulation["amplification"]["voltage_factor"]
+
+    @property
+    def current_amp(self) -> float:
+        return self.simulation["amplification"]["current_factor"]
+
+    @property
+    def exponential_diode_param(self) -> dict[str, float]:
+        if self.non_linearity == "experimental":
+            return {}
+        physical = self.simulation["physical"]
+        return {
+            "I_s": physical["saturation_current"],
+            "V_t": physical["thermal_voltage"],
+            "V_off": physical["offset_voltage"],
+        }
+
+    @property
+    def batch_size(self) -> int:
+        return self.training["loader"]["batch_size"]
+
+    @property
+    def num_epochs(self) -> int:
+        return self.training["epochs"]
+
+    @property
+    def num_iterations(self) -> int:
+        return self.equilibrium["sweeps"]
+
+    @property
+    def learning_rates(self) -> list[float]:
+        return list(self.training["optimizer"]["learning_rates"])
+
+    @property
+    def scheduler_gamma(self) -> float:
+        return self.training["scheduler"]["gamma"]
+
+    @property
+    def nudging(self) -> float:
+        return self.training["equilibrium_propagation"]["nudging"]
+
+    @property
+    def ep_variant(self) -> str:
+        return self.training["equilibrium_propagation"]["variant"]
+
+    @property
+    def seed(self) -> int:
+        return self.dataset["seed"]
 
 
 @dataclass(frozen=True)
 class TrainingResult:
     output_dir: Path
-    final_checkpoint: Path
+    final_checkpoint: Path | None
     best_checkpoint: Path
     history_path: Path
+    receipt_path: Path
     history: dict[str, list[float]]
 
 
@@ -144,7 +203,9 @@ class _LiveProgress:
             f"batches={self.total_batches} starting"
         )
 
-    def update(self, batch: int, *, running_loss: float, running_accuracy: float) -> None:
+    def update(
+        self, batch: int, *, running_loss: float, running_accuracy: float
+    ) -> None:
         batch = int(batch)
         if (
             not self.interactive
@@ -174,164 +235,390 @@ class _LiveProgress:
             print(message, file=self.stream, flush=True)
 
 
-def load_training_config(path: Path, *, repo_root: Path) -> tuple[TrainingConfig, dict[str, Any]]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(
-            "Expected the training configuration to contain a JSON object. "
-            f"Provided value in {path}: {type(raw).__name__}."
-        )
-    raw = _compose_simulator_profile(raw, repo_root=repo_root)
-    for legacy_field in _LEGACY_UNUSED_TRAINING_FIELDS:
-        raw.pop(legacy_field, None)
+def load_training_config(
+    path: Path | Mapping[str, Any],
+    *,
+    repo_root: Path,
+) -> tuple[TrainingConfig, dict[str, Any]]:
+    """Resolve a v2 source or reload an already-expanded immutable snapshot."""
 
-    dataset = _required_dict(raw, "dataset")
-    dataset_name = str(dataset.get("name", "")).strip().lower()
-    if dataset_name not in {"digits", "mnist"}:
-        raise ValueError(
-            "Expected config 'dataset.name' to be 'digits' or 'mnist'. "
-            f"Provided value: {dataset.get('name')!r}."
-        )
-
-    non_linearity = _required_str(raw, "non_linearity")
-    if non_linearity not in PAPER_NONLINEARITIES:
-        raise ValueError(
-            f"Expected config 'non_linearity' to be one of {PAPER_NONLINEARITIES}. "
-            f"Provided value: {non_linearity!r}."
-        )
-
-    if non_linearity in {"single_diode_exponential", "double_diode_exponential"}:
-        exponential = _required_dict(raw, "exponential_diode_param")
-        _require_keys(exponential, ("I_s", "V_t", "V_off"), "exponential_diode_param")
-    else:
-        exponential = {}
-
-    shapes_raw = _required_list(raw, "layer_shapes")
-    if len(shapes_raw) < 2 or any(not isinstance(shape, list) or not shape for shape in shapes_raw):
-        raise ValueError(
-            "Expected config 'layer_shapes' to contain at least two non-empty integer lists. "
-            f"Provided value: {shapes_raw!r}."
-        )
-    layer_shapes = [tuple(int(value) for value in shape) for shape in shapes_raw]
-    if any(any(value <= 0 for value in shape) for shape in layer_shapes):
-        raise ValueError(
-            "Expected every layer shape dimension to be positive. "
-            f"Provided value: {shapes_raw!r}."
-        )
-
-    weight_gains = [float(value) for value in _required_list(raw, "weight_gains")]
-    expected_gains = len(layer_shapes) - 1
-    if len(weight_gains) != expected_gains:
-        raise ValueError(
-            f"Expected config 'weight_gains' to contain {expected_gains} values. "
-            f"Provided value: {weight_gains!r}."
-        )
-
-    iv_data_path = raw.get("iv_data_path")
-    if iv_data_path is not None:
-        candidate = Path(str(iv_data_path)).expanduser()
-        if not candidate.is_absolute():
-            candidate = repo_root / candidate
-        iv_data_path = str(candidate.resolve())
-    if non_linearity == "experimental" and iv_data_path is None:
-        raise ValueError(
-            "Expected config 'iv_data_path' for the measured/PWL nonlinearity. "
-            "Provided value: None."
-        )
-
-    adaptive_equilibrium = _required(raw, "adaptive_equilibrium")
-    if not isinstance(adaptive_equilibrium, bool):
-        raise ValueError(
-            "Expected config 'adaptive_equilibrium' to be the boolean false during training. "
-            f"Provided value: {adaptive_equilibrium!r}."
-        )
-    use_polish = _required(raw, "use_polish")
-    if not isinstance(use_polish, bool):
-        raise ValueError(
-            "Expected config 'use_polish' to be a boolean. "
-            f"Provided value: {use_polish!r}."
-        )
-
-    config = TrainingConfig(
-        description=str(raw.get("description", "")),
-        dataset=dataset,
-        layer_shapes=layer_shapes,
-        non_linearity=non_linearity,
-        weight_gains=weight_gains,
-        weight_min=float(_required(raw, "weight_min")),
-        weight_max=float(_required(raw, "weight_max")),
-        weight_init_mode=_required_str(raw, "weight_init_mode"),
-        input_gain=float(_required(raw, "input_gain")),
-        voltage_amp=float(_required(raw, "voltage_amp")),
-        current_amp=float(_required(raw, "current_amp")),
-        exponential_diode_param=exponential,
-        batch_size=int(_required(raw, "batch_size")),
-        num_epochs=int(_required(raw, "num_epochs")),
-        num_iterations=int(_required(raw, "num_iterations")),
-        learning_rates=[float(value) for value in _required_list(raw, "learning_rates")],
-        scheduler_gamma=float(_required(raw, "scheduler_gamma")),
-        nudging=float(_required(raw, "nudging")),
-        ep_variant=_required_str(raw, "ep_variant"),
-        minimizer_impl=_required_str(raw, "minimizer_impl"),
-        mode=_required_str(raw, "mode"),
-        single_diode_updater=_required_str(raw, "single_diode_updater"),
-        double_diode_updater=_required_str(raw, "double_diode_updater"),
-        overrelaxation_factor=float(_required(raw, "overrelaxation_factor")),
-        adaptive_equilibrium=adaptive_equilibrium,
-        rel_tol=float(_required(raw, "rel_tol")),
-        vn_tol=float(_required(raw, "vn_tol")),
-        use_polish=use_polish,
-        max_newton_iters=int(_required(raw, "max_newton_iters")),
-        z_thresh=float(_required(raw, "z_thresh")),
-        exp_clip=float(_required(raw, "exp_clip")),
-        damping=float(_required(raw, "damping")),
-        experimental_newton_max_steps=int(_required(raw, "experimental_newton_max_steps")),
-        experimental_newton_tol=float(_required(raw, "experimental_newton_tol")),
-        seed=int(_required(raw, "seed")),
-        iv_data_path=iv_data_path,
+    source_record = _capture_source_record(path, repo_root=repo_root)
+    result = resolve_config_source(
+        path,
+        schema="training-v2.schema.json",
+        reference_fields={
+            "simulation_ref": "simulation",
+            "execution_ref": "execution",
+        },
+        reference_schemas={
+            "simulation": "simulator-v2.schema.json",
+            "execution": "execution-v2.schema.json",
+        },
+        repo_root=repo_root,
     )
-    _validate_scalar_fields(config)
-    return config, raw
+    _verify_and_stamp_source(result, source_record, repo_root=repo_root)
+    config = TrainingConfig(document=result.document)
+    _validate_relations(config)
+    simulation_assets(config.simulation, repo_root=repo_root)
+    return config, result.document
+
+
+def resolve_training_config(
+    path: Path | Mapping[str, Any],
+    *,
+    repo_root: Path,
+    overrides: Sequence[str] = (),
+) -> CompositionResult:
+    """Resolve references, apply explicit overrides, and validate the snapshot."""
+
+    source_record = _capture_source_record(path, repo_root=repo_root)
+    result = resolve_config_source(
+        path,
+        schema="training-v2.schema.json",
+        reference_fields={
+            "simulation_ref": "simulation",
+            "execution_ref": "execution",
+        },
+        reference_schemas={
+            "simulation": "simulator-v2.schema.json",
+            "execution": "execution-v2.schema.json",
+        },
+        repo_root=repo_root,
+    )
+    _verify_and_stamp_source(result, source_record, repo_root=repo_root)
+    if not overrides:
+        config = TrainingConfig(result.document)
+        _validate_relations(config)
+        simulation_assets(config.simulation, repo_root=repo_root)
+        return result
+
+    parsed = [_parse_override(value) for value in overrides]
+    permitted_owners = {
+        "data",
+        "model",
+        "training",
+        "equilibrium",
+        "simulation",
+        "execution",
+    }
+    forbidden = [
+        entry.pointer
+        for entry in parsed
+        if not entry.pointer.startswith("/")
+        or entry.pointer.split("/", maxsplit=2)[1] not in permitted_owners
+    ]
+    if forbidden:
+        raise ConfigurationOverrideError(
+            "Overrides may replace existing values only within data, model, "
+            "training, equilibrium, simulation, or execution; generated identity "
+            f"and provenance fields are immutable. Provided pointers: {forbidden}."
+        )
+    document = apply_json_pointer_overrides(result.document, parsed)
+    provenance = document["provenance"]
+    if "generation_overrides" in provenance:
+        raise ConfigurationOverrideError(
+            "An expanded snapshot already records generation_overrides; create a "
+            "new source config instead of stacking untraceable edits."
+        )
+    provenance["generation_overrides"] = [
+        {"pointer": entry.pointer, "value": entry.value} for entry in parsed
+    ]
+    validate_document(document, "training-v2.schema.json", repo_root=repo_root)
+    config = TrainingConfig(document)
+    _validate_relations(config)
+    simulation_assets(config.simulation, repo_root=repo_root)
+    return CompositionResult(document=document, references=result.references)
 
 
 def run_training(
     repo_root: Path,
     config_path: Path,
     *,
-    device: str = "cpu",
     output_dir: Path | None = None,
-    epochs: int | None = None,
-    num_iterations: int | None = None,
-    max_batches: int | None = None,
-    max_eval_batches: int | None = None,
+    overrides: Sequence[str] = (),
     download: bool = False,
 ) -> TrainingResult:
-    config_path = config_path.expanduser().resolve()
-    cfg, raw = load_training_config(config_path, repo_root=repo_root)
-    resolved_epochs = cfg.num_epochs if epochs is None else int(epochs)
-    resolved_iterations = cfg.num_iterations if num_iterations is None else int(num_iterations)
-    if resolved_epochs <= 0:
-        raise ValueError(f"Expected epochs to be positive. Provided value: {resolved_epochs!r}.")
-    if resolved_iterations <= 0:
-        raise ValueError(
-            f"Expected num_iterations to be positive. Provided value: {resolved_iterations!r}."
+    """Resolve then run one training config; numerical kwargs are not accepted."""
+
+    root = repo_root.expanduser().resolve()
+    source_path = config_path.expanduser()
+    if not source_path.is_absolute():
+        source_path = root / source_path
+    source_path = source_path.resolve()
+    source_sha256 = sha256_file(source_path)
+    resolved = resolve_training_config(
+        source_path,
+        repo_root=root,
+        overrides=overrides,
+    )
+    cfg = TrainingConfig(resolved.document)
+    if sha256_file(source_path) != source_sha256:
+        raise RuntimeError(
+            "Training source changed after resolution; refusing to run with "
+            "ambiguous source provenance."
         )
 
-    torch_device = resolve_device(device)
-    _set_seed(cfg.seed)
     if output_dir is None:
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        output_dir = repo_root / "outputs" / "training" / f"{config_path.stem}_{stamp}"
+        stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
+        output_dir = root / "outputs" / "training" / f"{source_path.stem}_{stamp}"
     elif not output_dir.is_absolute():
-        output_dir = repo_root / output_dir
-    output_dir = output_dir.resolve()
+        output_dir = root / output_dir
+    output_dir = output_dir.expanduser().resolve()
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(
+            "Expected a new or empty training output directory so stale artifacts "
+            f"cannot be mixed with this run. Provided value: {output_dir}."
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    train_loader, test_loader = _build_loaders(
-        cfg,
-        repo_root=repo_root,
-        download=download,
+    # The exact executable snapshot exists before importing data or constructing
+    # the numerical model. A failed run can therefore be replayed unambiguously.
+    resolved_path = output_dir / "config.resolved.json"
+    resolved_path.write_text(pretty_json_text(cfg.document), encoding="utf-8")
+
+    device = apply_execution_profile(cfg.execution)
+    seed_from_config(cfg.seed, cfg.execution)
+    (
+        train_loader,
+        evaluation_loader,
+        data_fingerprint,
+        split_fingerprint,
+    ) = _build_loaders(cfg, repo_root=root, download=download)
+    energy_fn = _build_energy(cfg, device)
+    network = Network(energy_fn, input_mode=_input_mode(cfg.model))
+    free_layers = network.free_layers()
+    cost_fn = _build_cost(cfg, energy_fn.layers()[-1])
+    ep = cfg.training["equilibrium_propagation"]
+    augmented_fn = AugmentedFunction(
+        energy_fn,
+        cost_fn,
+        nudging_mode=ep["nudging_mode"],
+        current_scale=None,
     )
+    inference_minimizer = build_minimizer(
+        fn=energy_fn,
+        free_layers=free_layers,
+        simulation=cfg.simulation,
+        equilibrium=cfg.equilibrium,
+        repo_root=root,
+    )
+    training_minimizer = build_minimizer(
+        fn=augmented_fn,
+        free_layers=free_layers,
+        simulation=cfg.simulation,
+        equilibrium=cfg.equilibrium,
+        repo_root=root,
+    )
+
+    params = energy_fn.params()
+    if len(cfg.learning_rates) != len(params):
+        raise ValueError(
+            "Expected training.optimizer.learning_rates to contain one value per "
+            f"trainable parameter ({len(params)}). Provided value: {cfg.learning_rates!r}."
+        )
+    estimator = EquilibriumProp(
+        params,
+        free_layers,
+        augmented_fn,
+        cost_fn,
+        training_minimizer,
+        variant=ep["variant"],
+        nudging=ep["nudging"],
+        use_alternative_formula=ep["gradient_formula"] == "alternative",
+    )
+    optimizer_config = cfg.training["optimizer"]
+    optimizer = torch.optim.SGD(
+        [
+            {"params": [parameter.state], "lr": learning_rate}
+            for parameter, learning_rate in zip(params, cfg.learning_rates)
+        ],
+        lr=0.0,
+        momentum=optimizer_config["momentum"],
+        dampening=optimizer_config["dampening"],
+        weight_decay=optimizer_config["weight_decay"],
+        nesterov=optimizer_config["nesterov"],
+        maximize=optimizer_config["maximize"],
+        foreach=optimizer_config["foreach"],
+        differentiable=optimizer_config["differentiable"],
+        fused=optimizer_config["fused"],
+    )
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        optimizer,
+        gamma=cfg.training["scheduler"]["gamma"],
+        last_epoch=cfg.training["scheduler"]["initial_epoch"],
+    )
+
+    limits = cfg.training["batch_limits"]
+    history: dict[str, list[float]] = {
+        "train_loss": [],
+        "train_accuracy": [],
+        "test_loss": [],
+        "test_accuracy": [],
+    }
+    best_accuracy = -math.inf
+    best_checkpoint = output_dir / "model_best.pt"
+    started = time.perf_counter()
+    for epoch in range(cfg.num_epochs):
+        train_progress = _LiveProgress(
+            "train",
+            epoch + 1,
+            cfg.num_epochs,
+            _effective_batch_count(train_loader, limits["train"]),
+        )
+        train_loss, train_accuracy = _train_epoch(
+            network,
+            cost_fn,
+            params,
+            optimizer,
+            estimator,
+            inference_minimizer,
+            train_loader,
+            zero_grad_set_to_none=optimizer_config["zero_grad_set_to_none"],
+            max_batches=limits["train"],
+            progress=train_progress,
+        )
+        scheduler.step()
+        evaluation_progress = _LiveProgress(
+            "eval",
+            epoch + 1,
+            cfg.num_epochs,
+            _effective_batch_count(evaluation_loader, limits["evaluation"]),
+        )
+        test_loss, test_accuracy = _evaluate(
+            network,
+            cost_fn,
+            inference_minimizer,
+            evaluation_loader,
+            max_batches=limits["evaluation"],
+            progress=evaluation_progress,
+        )
+        history["train_loss"].append(train_loss)
+        history["train_accuracy"].append(train_accuracy)
+        history["test_loss"].append(test_loss)
+        history["test_accuracy"].append(test_accuracy)
+        if test_accuracy > best_accuracy:
+            best_accuracy = test_accuracy
+            energy_fn.save(best_checkpoint)
+        print(
+            f"epoch={epoch + 1}/{cfg.num_epochs} "
+            f"train_loss={train_loss:.6g} train_accuracy={train_accuracy:.4f} "
+            f"test_loss={test_loss:.6g} test_accuracy={test_accuracy:.4f}"
+        )
+
+    duration_seconds = time.perf_counter() - started
+    checkpoint_policy = cfg.training["checkpoint"]
+    final_checkpoint: Path | None = None
+    if checkpoint_policy["save_final"]:
+        final_checkpoint = output_dir / "model.pt"
+        energy_fn.save(final_checkpoint)
+    history_path = output_dir / "history.json"
+    history_path.write_text(pretty_json_text(history), encoding="utf-8")
+
+    assets = {
+        "best_checkpoint": best_checkpoint,
+        **simulation_assets(cfg.simulation, repo_root=root),
+    }
+    if final_checkpoint is not None:
+        assets["final_checkpoint"] = final_checkpoint
+    receipt = build_run_receipt(
+        repo_root=root,
+        resolved_config=cfg.document,
+        execution=cfg.execution,
+        device=device,
+        assets=assets,
+        source_documents=[
+            {
+                "owner": "training",
+                "path": _relative_or_absolute(source_path, root),
+                "sha256": source_sha256,
+            },
+            *[
+                dict(record)
+                for record in cfg.document["provenance"].get(
+                    "config_sources", []
+                )
+                if not (
+                    record["path"] == _relative_or_absolute(source_path, root)
+                    and record["sha256"] == source_sha256
+                )
+            ],
+        ],
+        data_fingerprint=data_fingerprint,
+        split_fingerprint=split_fingerprint,
+        extra={
+            "source_config": _relative_or_absolute(source_path, root),
+            "duration_seconds": duration_seconds,
+            "best_test_accuracy": best_accuracy,
+            "final_test_accuracy": history["test_accuracy"][-1],
+            "final_train_accuracy": history["train_accuracy"][-1],
+        },
+    )
+    receipt_path = output_dir / "run_receipt.json"
+    receipt_path.write_text(pretty_json_text(receipt), encoding="utf-8")
+    metadata = {
+        "resolved_config_sha256": receipt["resolved_config_sha256"],
+        "receipt": receipt_path.name,
+        "best_checkpoint": best_checkpoint.name,
+        "best_checkpoint_sha256": sha256_file(best_checkpoint),
+        "final_checkpoint": None if final_checkpoint is None else final_checkpoint.name,
+        "final_checkpoint_sha256": (
+            None if final_checkpoint is None else sha256_file(final_checkpoint)
+        ),
+        "best_test_accuracy": best_accuracy,
+        "final_test_accuracy": history["test_accuracy"][-1],
+        "final_train_accuracy": history["train_accuracy"][-1],
+    }
+    (output_dir / "run_metadata.json").write_text(
+        pretty_json_text(metadata),
+        encoding="utf-8",
+    )
+    return TrainingResult(
+        output_dir=output_dir,
+        final_checkpoint=final_checkpoint,
+        best_checkpoint=best_checkpoint,
+        history_path=history_path,
+        receipt_path=receipt_path,
+        history=history,
+    )
+
+
+def run_smoke_suite(repo_root: Path) -> list[TrainingResult]:
+    """Run explicit generated one-batch snapshots for all three families."""
+
+    names = (
+        "digits_single_shockley.json",
+        "digits_double_shockley.json",
+        "digits_pwl.json",
+    )
+    overrides = (
+        "/training/epochs=1",
+        "/equilibrium/sweeps=2",
+        "/training/batch_limits/train=1",
+        "/training/batch_limits/evaluation=1",
+    )
+    run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
+    return [
+        run_training(
+            repo_root,
+            repo_root / "configs" / "train" / name,
+            output_dir=repo_root
+            / "outputs"
+            / "training"
+            / "smoke"
+            / run_id
+            / Path(name).stem,
+            overrides=overrides,
+        )
+        for name in names
+    ]
+
+
+def _build_energy(cfg: TrainingConfig, device: torch.device) -> DeepResistiveEnergy:
+    model = cfg.model
+    if model["state_dtype"] != cfg.execution["backend"]["default_dtype"]:
+        raise ValueError(
+            "Expected model.state_dtype to match execution.backend.default_dtype."
+        )
     energy_fn = DeepResistiveEnergy(
         layer_shapes=cfg.layer_shapes,
         weight_gains=cfg.weight_gains,
@@ -345,187 +632,39 @@ def run_training(
         weight_min=cfg.weight_min,
         weight_max=cfg.weight_max,
         weight_init_mode=cfg.weight_init_mode,
+        bias_scale_mode=model["bias"]["scale_mode"],
+        bias_interaction_type=model["bias"]["interaction"],
+        bias_enabled=model["bias"]["enabled"],
+        bias_initial_value=model["bias"]["initialization"]["value"],
+        bias_minimum=model["bias"]["bounds"]["minimum"],
+        bias_maximum=model["bias"]["bounds"]["maximum"],
+        signed_weights=model["signed_weights"],
+        conv_pipeline=[],
+        learn_input_gain=model["amplification_learning"]["input_gain"],
+        learn_voltage_amp=model["amplification_learning"]["voltage_factor"],
+        learn_current_amp=model["amplification_learning"]["current_factor"],
     )
-    energy_fn.set_device(torch_device)
-    network = Network(energy_fn)
-    free_layers = network.free_layers()
-    output_layer = energy_fn.layers()[-1]
-    output_width = int(output_layer.shape[0])
-    if output_width == 10:
-        cost_fn = SquaredError(output_layer)
-    elif output_width == 20:
-        cost_fn = SquaredErrorPairedOutputs(output_layer, num_classes=10)
-    else:
+    energy_fn.set_device(device)
+    return energy_fn
+
+
+def _build_cost(cfg: TrainingConfig, output_layer):
+    output = cfg.model["output"]
+    if output["classes"] != 10:
         raise ValueError(
-            "Expected the output layer width to be 10 or 20 for Digits/MNIST. "
-            f"Provided value: {output_layer.shape!r}."
+            f"Expected {cfg.dataset['source']} model.output.classes to be 10; "
+            f"got {output['classes']}."
         )
-
-    augmented_fn = AugmentedFunction(energy_fn, cost_fn)
-    inference_minimizer = _build_minimizer(cfg, energy_fn, free_layers, resolved_iterations)
-    training_minimizer = _build_minimizer(cfg, augmented_fn, free_layers, resolved_iterations)
-    params = energy_fn.params()
-    if len(cfg.learning_rates) != len(params):
-        raise ValueError(
-            f"Expected config 'learning_rates' to contain {len(params)} values, one per trainable parameter. "
-            f"Provided value: {cfg.learning_rates!r}."
-        )
-    estimator = EquilibriumProp(
-        params,
-        free_layers,
-        augmented_fn,
-        cost_fn,
-        training_minimizer,
-        variant=cfg.ep_variant,
-        nudging=cfg.nudging,
-    )
-    optimizer = torch.optim.SGD(
-        [
-            {"params": [param.state], "lr": learning_rate}
-            for param, learning_rate in zip(params, cfg.learning_rates)
-        ],
-        lr=0.1,
-        momentum=0.0,
-        weight_decay=0.0,
-    )
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        optimizer,
-        gamma=cfg.scheduler_gamma,
-    )
-
-    resolved = dict(raw)
-    resolved["config_path"] = _relative_or_absolute(config_path, repo_root)
-    resolved["device"] = str(torch_device)
-    resolved["num_epochs"] = resolved_epochs
-    resolved["num_iterations"] = resolved_iterations
-    resolved["max_batches"] = max_batches
-    resolved["max_eval_batches"] = max_eval_batches
-    resolved["download"] = bool(download)
-    resolved["iv_data_path_resolved"] = cfg.iv_data_path
-    _write_json(output_dir / "config.resolved.json", resolved)
-
-    history: dict[str, list[float]] = {
-        "train_loss": [],
-        "train_accuracy": [],
-        "test_loss": [],
-        "test_accuracy": [],
-    }
-    best_accuracy = -math.inf
-    best_checkpoint = output_dir / "model_best.pt"
-    start = time.perf_counter()
-
-    for epoch in range(resolved_epochs):
-        train_progress = _LiveProgress(
-            "train",
-            epoch + 1,
-            resolved_epochs,
-            _effective_batch_count(train_loader, max_batches),
-        )
-        train_loss, train_accuracy = _train_epoch(
-            network,
-            cost_fn,
-            params,
-            optimizer,
-            estimator,
-            inference_minimizer,
-            train_loader,
-            max_batches=max_batches,
-            progress=train_progress,
-        )
-        # Match the paper loop: epoch 1 uses the configured rates, then rates
-        # are decayed before epoch 2 begins.
-        scheduler.step()
-        eval_progress = _LiveProgress(
-            "eval",
-            epoch + 1,
-            resolved_epochs,
-            _effective_batch_count(test_loader, max_eval_batches),
-        )
-        test_loss, test_accuracy = _evaluate(
-            network,
-            cost_fn,
-            inference_minimizer,
-            test_loader,
-            max_batches=max_eval_batches,
-            progress=eval_progress,
-        )
-        history["train_loss"].append(train_loss)
-        history["train_accuracy"].append(train_accuracy)
-        history["test_loss"].append(test_loss)
-        history["test_accuracy"].append(test_accuracy)
-        if test_accuracy > best_accuracy:
-            best_accuracy = test_accuracy
-            energy_fn.save(best_checkpoint)
-        print(
-            f"epoch={epoch + 1}/{resolved_epochs} "
-            f"train_loss={train_loss:.6g} train_accuracy={train_accuracy:.4f} "
-            f"test_loss={test_loss:.6g} test_accuracy={test_accuracy:.4f}"
-        )
-
-    duration_seconds = time.perf_counter() - start
-    final_checkpoint = output_dir / "model.pt"
-    energy_fn.save(final_checkpoint)
-    history_path = output_dir / "history.json"
-    _write_json(history_path, history)
-    metadata = {
-        "non_linearity": cfg.non_linearity,
-        "dataset": cfg.dataset.get("name"),
-        "layer_shapes": [list(shape) for shape in cfg.layer_shapes],
-        "learning_rates": cfg.learning_rates,
-        "scheduler_gamma": cfg.scheduler_gamma,
-        "final_learning_rates": [group["lr"] for group in optimizer.param_groups],
-        "scheduler_step_timing": "after-training-epoch",
-        "input_gain": cfg.input_gain,
-        "adaptive_equilibrium": cfg.adaptive_equilibrium,
-        "seed": cfg.seed,
-        "device": str(torch_device),
-        "epochs": resolved_epochs,
-        "num_iterations": resolved_iterations,
-        "max_batches": max_batches,
-        "max_eval_batches": max_eval_batches,
-        "duration_seconds": duration_seconds,
-        "best_test_accuracy": best_accuracy,
-        "final_test_accuracy": history["test_accuracy"][-1],
-        "final_train_accuracy": history["train_accuracy"][-1],
-        "final_checkpoint": final_checkpoint.name,
-        "final_checkpoint_sha256": _sha256(final_checkpoint),
-        "best_checkpoint": best_checkpoint.name,
-        "best_checkpoint_sha256": _sha256(best_checkpoint),
-        "python": platform.python_version(),
-        "numpy": np.__version__,
-        "torch": torch.__version__,
-    }
-    _write_json(output_dir / "run_metadata.json", metadata)
-    return TrainingResult(
-        output_dir=output_dir,
-        final_checkpoint=final_checkpoint,
-        best_checkpoint=best_checkpoint,
-        history_path=history_path,
-        history=history,
-    )
-
-
-def run_smoke_suite(repo_root: Path, *, device: str = "cpu") -> list[TrainingResult]:
-    config_names = (
-        "digits_single_shockley.json",
-        "digits_double_shockley.json",
-        "digits_pwl.json",
-    )
-    results = []
-    for config_name in config_names:
-        output = repo_root / "outputs" / "training" / "smoke" / Path(config_name).stem
-        result = run_training(
-            repo_root,
-            repo_root / "configs" / "train" / config_name,
-            device=device,
-            output_dir=output,
-            epochs=1,
-            num_iterations=4,
-            max_batches=1,
-            max_eval_batches=1,
-        )
-        results.append(result)
-    return results
+    width = int(output_layer.shape[0])
+    if output["encoding"] == "single_ended":
+        if width != output["classes"]:
+            raise ValueError("Configured single-ended output width does not match.")
+        return SquaredError(output_layer)
+    if output["encoding"] == "differential_pair":
+        if width != 2 * output["classes"]:
+            raise ValueError("Configured differential output width does not match.")
+        return SquaredErrorPairedOutputs(output_layer, output["classes"])
+    raise ValueError(f"Unsupported model.output.encoding: {output['encoding']!r}.")
 
 
 def _build_loaders(
@@ -533,58 +672,101 @@ def _build_loaders(
     *,
     repo_root: Path,
     download: bool,
-) -> tuple[DataLoader, DataLoader]:
-    dataset_name = str(cfg.dataset["name"]).lower()
-    if dataset_name == "digits":
-        digits = load_digits()
-        x = digits.data
-        y = digits.target
-        num_samples = cfg.dataset.get("num_samples")
-        if num_samples is not None:
-            count = int(num_samples)
-            if count <= 1:
-                raise ValueError(
-                    "Expected config 'dataset.num_samples' to be greater than one or null. "
-                    f"Provided value: {num_samples!r}."
-                )
-            if count < x.shape[0]:
-                indices = np.random.RandomState(cfg.seed).permutation(x.shape[0])[:count]
-                x = x[indices]
-                y = y[indices]
-        x_tensor = torch.tensor(x, dtype=torch.float32) / 16.0 * 2.0 - 1.0
-        y_tensor = torch.tensor(y, dtype=torch.long)
-        dataset = TensorDataset(x_tensor, y_tensor)
-        train_fraction = float(cfg.dataset.get("train_fraction", 0.8))
-        if not 0.0 < train_fraction < 1.0:
-            raise ValueError(
-                "Expected config 'dataset.train_fraction' to lie strictly between zero and one. "
-                f"Provided value: {train_fraction!r}."
-            )
-        train_size = int(train_fraction * len(dataset))
-        test_size = len(dataset) - train_size
-        generator = torch.Generator().manual_seed(cfg.seed)
-        train_dataset, test_dataset = random_split(
-            dataset,
-            [train_size, test_size],
-            generator=generator,
-        )
-        return (
-            DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True, generator=generator),
-            DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False),
-        )
+) -> tuple[DataLoader, DataLoader, str, str]:
+    if cfg.dataset["source"] == "sklearn_digits":
+        return _digits_loaders(cfg)
+    if cfg.dataset["source"] == "torchvision_mnist":
+        return _mnist_loaders(cfg, repo_root=repo_root, download=download)
+    raise ValueError(f"Unsupported data.source: {cfg.dataset['source']!r}.")
 
+
+def _digits_loaders(
+    cfg: TrainingConfig,
+) -> tuple[DataLoader, DataLoader, str, str]:
+    values, targets = load_digits(
+        n_class=10,
+        return_X_y=True,
+        as_frame=False,
+    )
+    values = np.asarray(values)
+    targets = np.asarray(targets)
+    original_indices = np.arange(values.shape[0], dtype=np.int64)
+    data_fingerprint = sha256_arrays(values, targets)
+
+    subset = cfg.dataset["subset"]
+    if subset["method"] == "seeded_random":
+        if subset["count"] > len(values):
+            raise ValueError(
+                "Expected Digits subset.count not to exceed the loaded dataset "
+                f"length {len(values)}. Provided value: {subset['count']}."
+            )
+        selected = np.random.RandomState(cfg.seed).permutation(len(values))[: subset["count"]]
+        values = values[selected]
+        targets = targets[selected]
+        original_indices = original_indices[selected]
+    elif subset["method"] != "all":
+        raise ValueError(f"Unsupported Digits subset method: {subset['method']!r}.")
+
+    preprocessing = cfg.dataset["preprocessing"]
+    input_dtype = _TORCH_DTYPES[cfg.dataset["preprocessing"]["dtype"]]
+    inputs = torch.tensor(values, dtype=input_dtype)
+    inputs = (
+        inputs / preprocessing["divisor"] * preprocessing["multiplier"]
+        + preprocessing["offset"]
+    )
+    labels = torch.tensor(targets, dtype=torch.long)
+    dataset = TensorDataset(inputs, labels)
+    split = cfg.dataset["split"]
+    if split["rounding"] != "floor":
+        raise ValueError("Expected data.split.rounding to be 'floor'.")
+    train_size = math.floor(split["train_fraction"] * len(dataset))
+    test_size = len(dataset) - train_size
+    if train_size < 1 or test_size < 1:
+        raise ValueError(
+            "Expected the configured Digits split to produce at least one train "
+            f"and evaluation example. Produced train={train_size}, evaluation={test_size}."
+        )
+    generator = torch.Generator().manual_seed(cfg.seed)
+    train_dataset, test_dataset = random_split(
+        dataset,
+        [train_size, test_size],
+        generator=generator,
+    )
+    split_fingerprint = sha256_arrays(
+        original_indices,
+        np.asarray(train_dataset.indices, dtype=np.int64),
+        np.asarray(test_dataset.indices, dtype=np.int64),
+    )
+    return (
+        _loader(cfg, train_dataset, shuffle=cfg.training["loader"]["train_shuffle"], generator=generator),
+        _loader(cfg, test_dataset, shuffle=cfg.training["loader"]["evaluation_shuffle"]),
+        data_fingerprint,
+        split_fingerprint,
+    )
+
+
+def _mnist_loaders(
+    cfg: TrainingConfig,
+    *,
+    repo_root: Path,
+    download: bool,
+) -> tuple[DataLoader, DataLoader, str, str]:
     try:
         from torchvision import datasets, transforms
-    except Exception as exc:  # pragma: no cover - depends on optional binary installation
+    except Exception as exc:  # pragma: no cover - optional binary installation
         raise RuntimeError(
-            "Expected torchvision to be importable for dataset.name='mnist'. "
+            "Expected torchvision to be importable for torchvision_mnist. "
             f"Provided environment raised: {exc!r}."
         ) from exc
-    root_value = cfg.dataset.get("root", "data/external/mnist")
-    dataset_root = Path(str(root_value)).expanduser()
-    if not dataset_root.is_absolute():
-        dataset_root = repo_root / dataset_root
-    transform = _build_mnist_transform(cfg.dataset, transforms)
+    relative_root = Path(cfg.dataset["path"])
+    if relative_root.is_absolute():
+        raise ValueError("Expected MNIST data.path to be repository-relative.")
+    dataset_root = (repo_root / relative_root).resolve()
+    try:
+        dataset_root.relative_to(repo_root.resolve())
+    except ValueError as exc:
+        raise ValueError("Expected MNIST data.path to stay inside the repository.") from exc
+    transform = _build_mnist_transform(cfg.dataset["preprocessing"], transforms)
     try:
         train_dataset = datasets.MNIST(
             root=dataset_root,
@@ -592,7 +774,7 @@ def _build_loaders(
             download=download,
             transform=transform,
         )
-        test_dataset = datasets.MNIST(
+        evaluation_dataset = datasets.MNIST(
             root=dataset_root,
             train=False,
             download=download,
@@ -600,93 +782,95 @@ def _build_loaders(
         )
     except RuntimeError as exc:
         raise RuntimeError(
-            "Expected MNIST under the configured dataset root or --download to be supplied. "
-            f"Provided value: root={dataset_root}, download={download}."
+            "Expected MNIST under data.path or --download. "
+            f"Provided value: path={dataset_root}, download={download}."
         ) from exc
-    train_limit = cfg.dataset.get("train_samples")
-    test_limit = cfg.dataset.get("test_samples")
-    if train_limit is not None:
-        train_dataset = Subset(train_dataset, range(min(int(train_limit), len(train_dataset))))
-    if test_limit is not None:
-        test_dataset = Subset(test_dataset, range(min(int(test_limit), len(test_dataset))))
+
+    data_fingerprint = sha256_arrays(
+        np.asarray(train_dataset.data),
+        np.asarray(train_dataset.targets),
+        np.asarray(evaluation_dataset.data),
+        np.asarray(evaluation_dataset.targets),
+    )
+    subset = cfg.dataset["subset"]
+    train_indices = np.arange(len(train_dataset), dtype=np.int64)
+    evaluation_indices = np.arange(len(evaluation_dataset), dtype=np.int64)
+    if subset["method"] == "prefix":
+        if subset["train_count"] > len(train_dataset) or subset["evaluation_count"] > len(evaluation_dataset):
+            raise ValueError(
+                "Expected MNIST prefix counts not to exceed the official dataset "
+                f"sizes. Provided train={subset['train_count']}/{len(train_dataset)}, "
+                f"evaluation={subset['evaluation_count']}/{len(evaluation_dataset)}."
+            )
+        train_indices = train_indices[: subset["train_count"]]
+        evaluation_indices = evaluation_indices[: subset["evaluation_count"]]
+        train_dataset = Subset(train_dataset, train_indices.tolist())
+        evaluation_dataset = Subset(
+            evaluation_dataset, evaluation_indices.tolist()
+        )
+    elif subset["method"] != "all":
+        raise ValueError(f"Unsupported MNIST subset method: {subset['method']!r}.")
+    split_fingerprint = sha256_arrays(train_indices, evaluation_indices)
     generator = torch.Generator().manual_seed(cfg.seed)
     return (
-        DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True, generator=generator),
-        DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False),
+        _loader(
+            cfg,
+            train_dataset,
+            shuffle=cfg.training["loader"]["train_shuffle"],
+            generator=generator,
+        ),
+        _loader(
+            cfg,
+            evaluation_dataset,
+            shuffle=cfg.training["loader"]["evaluation_shuffle"],
+        ),
+        data_fingerprint,
+        split_fingerprint,
     )
 
 
-def _build_mnist_transform(dataset: dict[str, Any], transforms):
-    transform_steps: list[Any] = [transforms.ToTensor()]
-    if bool(dataset.get("normalize", True)):
-        normalize_mean = float(dataset.get("normalize_mean", 0.1307))
-        normalize_standard_deviation = float(
-            dataset.get("normalize_standard_deviation", 0.3081)
+def _loader(
+    cfg: TrainingConfig,
+    dataset,
+    *,
+    shuffle: bool,
+    generator: torch.Generator | None = None,
+) -> DataLoader:
+    return DataLoader(
+        dataset,
+        batch_size=cfg.batch_size,
+        shuffle=shuffle,
+        drop_last=cfg.training["loader"]["drop_last"],
+        generator=generator,
+        **dataloader_kwargs(cfg.execution),
+    )
+
+
+def _build_mnist_transform(preprocessing: dict[str, Any], transforms):
+    dtype = _TORCH_DTYPES[preprocessing["dtype"]]
+    steps: list[Any] = [transforms.ToTensor()]
+    if dtype != torch.float32:
+        steps.append(
+            transforms.Lambda(lambda tensor, dtype=dtype: tensor.to(dtype=dtype))
         )
-        # In the historical runner, ``normalize_std`` was a multiplier applied
-        # after standard MNIST normalization. Keep it as a legacy alias while
-        # using an unambiguous field name in this repository.
-        normalize_scale = float(
-            dataset.get("normalize_scale", dataset.get("normalize_std", 1.0))
-        )
-        if normalize_standard_deviation <= 0.0:
-            raise ValueError(
-                "Expected config 'dataset.normalize_standard_deviation' to be positive. "
-                f"Provided value: {normalize_standard_deviation!r}."
-            )
-        if normalize_scale <= 0.0:
-            raise ValueError(
-                "Expected config 'dataset.normalize_scale' to be positive. "
-                f"Provided value: {normalize_scale!r}."
-            )
-        transform_steps.append(
+    if preprocessing["method"] == "normalized_tensor":
+        steps.append(
             transforms.Normalize(
-                (normalize_mean,),
-                (normalize_standard_deviation,),
+                (preprocessing["mean"],),
+                (preprocessing["standard_deviation"],),
             )
         )
-        if not math.isclose(normalize_scale, 1.0):
-            transform_steps.append(
-                transforms.Lambda(lambda tensor, scale=normalize_scale: tensor * scale)
+        if preprocessing["scale"] != 1.0:
+            steps.append(
+                transforms.Lambda(
+                    lambda tensor, scale=preprocessing["scale"]: tensor * scale
+                )
             )
-    return transforms.Compose(transform_steps)
-
-
-def _build_minimizer(cfg: TrainingConfig, fn, free_layers, num_iterations: int):
-    if cfg.minimizer_impl != "custom":
+    elif preprocessing["method"] != "to_tensor":
         raise ValueError(
-            "Expected config 'minimizer_impl' to be 'custom'. "
-            f"Provided value: {cfg.minimizer_impl!r}."
+            f"Unsupported MNIST preprocessing method: {preprocessing['method']!r}."
         )
-    settings = MinimizerSettings(
-        rel_tol=cfg.rel_tol,
-        vn_tol=cfg.vn_tol,
-        use_polish=cfg.use_polish,
-        max_newton_iters=cfg.max_newton_iters,
-        z_thresh=cfg.z_thresh,
-        exp_clip=cfg.exp_clip,
-        experimental_newton_tol=cfg.experimental_newton_tol,
-    )
-    iv_data = load_iv_data(cfg.iv_data_path) if cfg.non_linearity == "experimental" else None
-    return QuadraticMinimizer(
-        fn=fn,
-        free_layers=free_layers,
-        num_iterations=num_iterations,
-        mode=cfg.mode,
-        non_linearity=cfg.non_linearity,
-        quadratic_diode_param={},
-        exponential_diode_param=cfg.exponential_diode_param,
-        voltage_amp=cfg.voltage_amp,
-        current_amp=cfg.current_amp,
-        iv_data=iv_data,
-        double_diode_updater=cfg.double_diode_updater,
-        adaptive_equilibrium=cfg.adaptive_equilibrium,
-        overrelaxation_factor=cfg.overrelaxation_factor,
-        single_diode_updater=cfg.single_diode_updater,
-        damping=cfg.damping,
-        experimental_newton_max_steps=cfg.experimental_newton_max_steps,
-        minimizer_settings=settings,
-    )
+    return transforms.Compose(steps)
 
 
 def _train_epoch(
@@ -698,6 +882,7 @@ def _train_epoch(
     inference_minimizer,
     loader,
     *,
+    zero_grad_set_to_none: bool,
     max_batches: int | None,
     progress: _LiveProgress,
 ) -> tuple[float, float]:
@@ -711,34 +896,36 @@ def _train_epoch(
                 break
             inputs = inputs.to(network._function._device)
             labels = labels.to(network._function._device)
-            optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad(set_to_none=zero_grad_set_to_none)
             network.set_input(inputs, reset=True)
             _validate_input_state(network, inputs)
             inference_minimizer.compute_equilibrium()
+            _validate_finite_layers(network.free_layers(), context="free inference")
             cost_fn.set_target(labels)
             batch_loss = float(cost_fn.eval().mean().item())
+            if not math.isfinite(batch_loss):
+                raise FloatingPointError("Expected a finite training loss.")
             errors = cost_fn.error_fn()
             batch_size = int(labels.numel())
             loss_sum += batch_loss * batch_size
             correct += batch_size - int(errors.sum().item())
             seen += batch_size
-
             gradients = estimator.compute_gradient()
+            _validate_finite_layers(network.free_layers(), context="nudged equilibrium")
             if len(gradients) < len(params):
                 raise RuntimeError(
-                    f"Expected at least {len(params)} parameter gradients. "
-                    f"Provided value: {len(gradients)}."
+                    f"Expected at least {len(params)} gradients, got {len(gradients)}."
                 )
-            for param, gradient in zip(params, gradients):
+            for parameter, gradient in zip(params, gradients):
                 if not torch.isfinite(gradient).all():
                     raise FloatingPointError(
-                        "Expected every equilibrium-propagation gradient to be finite. "
-                        f"Provided value: parameter={param.name!r}."
+                        "Expected every equilibrium-propagation gradient to be "
+                        f"finite. Provided parameter={parameter.name!r}."
                     )
-                param.state.grad = gradient.detach()
+                parameter.state.grad = gradient.detach()
             optimizer.step()
-            for param in params:
-                param.clamp_()
+            for parameter in params:
+                parameter.clamp_()
             progress.update(
                 batch_index + 1,
                 running_loss=loss_sum / seen,
@@ -746,12 +933,8 @@ def _train_epoch(
             )
     finally:
         progress.close()
-
     if seen == 0:
-        raise ValueError(
-            "Expected at least one training batch after applying max_batches. "
-            f"Provided value: max_batches={max_batches!r}."
-        )
+        raise ValueError("Expected at least one training batch.")
     return loss_sum / seen, correct / seen
 
 
@@ -777,9 +960,13 @@ def _evaluate(
             network.set_input(inputs, reset=True)
             _validate_input_state(network, inputs)
             minimizer.compute_equilibrium()
+            _validate_finite_layers(network.free_layers(), context="evaluation equilibrium")
             cost_fn.set_target(labels)
             batch_size = int(labels.numel())
-            loss_sum += float(cost_fn.eval().mean().item()) * batch_size
+            batch_loss = float(cost_fn.eval().mean().item())
+            if not math.isfinite(batch_loss):
+                raise FloatingPointError("Expected a finite evaluation loss.")
+            loss_sum += batch_loss * batch_size
             correct += batch_size - int(cost_fn.error_fn().sum().item())
             seen += batch_size
             progress.update(
@@ -790,18 +977,12 @@ def _evaluate(
     finally:
         progress.close()
     if seen == 0:
-        raise ValueError(
-            "Expected at least one evaluation batch after applying max_eval_batches. "
-            f"Provided value: max_eval_batches={max_batches!r}."
-        )
+        raise ValueError("Expected at least one evaluation batch.")
     return loss_sum / seen, correct / seen
 
 
-def _effective_batch_count(loader, max_batches: int | None) -> int:
-    available = len(loader)
-    if max_batches is None:
-        return available
-    return min(available, max(0, int(max_batches)))
+def _effective_batch_count(loader, maximum: int | None) -> int:
+    return len(loader) if maximum is None else min(len(loader), maximum)
 
 
 def _validate_input_state(network, raw_inputs: torch.Tensor) -> None:
@@ -809,211 +990,204 @@ def _validate_input_state(network, raw_inputs: torch.Tensor) -> None:
     provided = tuple(network.layers()[0].state.shape[1:])
     if provided != expected:
         raise ValueError(
-            "Expected doubled input tensor shape to match config 'layer_shapes[0]'. "
-            f"Provided value: raw_shape={tuple(raw_inputs.shape)}, doubled_shape={provided}, expected={expected}."
+            "Expected doubled input tensor shape to match model.layer_shapes[0]. "
+            f"Provided raw={tuple(raw_inputs.shape)}, doubled={provided}, expected={expected}."
         )
 
 
-def _compose_simulator_profile(
-    training: dict[str, Any],
-    *,
-    repo_root: Path,
-) -> dict[str, Any]:
-    """Expand a repo-relative simulator profile into a training configuration."""
-
-    if "simulator_profile" not in training:
-        return dict(training)
-
-    reference = training["simulator_profile"]
-    if not isinstance(reference, str) or not reference.strip():
-        raise ValueError(
-            "Expected config field 'simulator_profile' to be a non-empty, "
-            f"repo-relative path. Provided value: {reference!r}."
-        )
-
-    root = repo_root.expanduser().resolve()
-    relative_path = Path(reference.strip())
-    if relative_path.is_absolute():
-        raise ValueError(
-            "Expected config field 'simulator_profile' to be relative to the repository root. "
-            f"Provided value: {reference!r}."
-        )
-    profile_path = (root / relative_path).resolve()
-    try:
-        profile_path.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(
-            "Expected config field 'simulator_profile' to resolve inside the repository root. "
-            f"Provided value: {reference!r}."
-        ) from exc
-
-    if not profile_path.is_file():
-        raise ValueError(
-            "Expected config field 'simulator_profile' to name an existing JSON file. "
-            f"Provided value: {reference!r} (resolved to {profile_path})."
-        )
-    try:
-        profile = json.loads(profile_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            "Expected config field 'simulator_profile' to name a readable JSON file. "
-            f"Provided value: {reference!r} ({exc})."
-        ) from exc
-    if not isinstance(profile, dict):
-        raise ValueError(
-            "Expected the simulator profile to contain a JSON object. "
-            f"Provided value in {profile_path}: {type(profile).__name__}."
-        )
-
-    allowed_profile_fields = (
-        _SIMULATOR_PROFILE_FIELDS
-        | _SIMULATOR_PROFILE_METADATA_FIELDS
-        | _LEGACY_UNUSED_TRAINING_FIELDS
-    )
-    unknown_fields = sorted(set(profile).difference(allowed_profile_fields))
-    if unknown_fields:
-        raise ValueError(
-            "Expected simulator profile fields to be recognized simulator settings or metadata. "
-            f"Provided unknown fields in {profile_path}: {unknown_fields}."
-        )
-
-    simulator_values = {
-        key: value for key, value in profile.items() if key in _SIMULATOR_PROFILE_FIELDS
-    }
-    collisions = sorted(set(training).intersection(simulator_values))
-    if collisions:
-        raise ValueError(
-            "Expected simulator settings to come either from 'simulator_profile' or inline, "
-            "not both. "
-            f"Provided duplicate fields: {collisions}."
-        )
-
-    expanded = dict(training)
-    expanded.pop("simulator_profile")
-    expanded.pop("simulator_profile_source", None)
-    expanded.pop("simulator_profile_sha256", None)
-    expanded.update(simulator_values)
-    expanded["simulator_profile_source"] = _relative_or_absolute(profile_path, root)
-    expanded["simulator_profile_sha256"] = _sha256(profile_path)
-    return expanded
-
-
-def _validate_scalar_fields(cfg: TrainingConfig) -> None:
-    positive_fields = {
-        "batch_size": cfg.batch_size,
-        "num_epochs": cfg.num_epochs,
-        "num_iterations": cfg.num_iterations,
-        "nudging": cfg.nudging,
-        "scheduler_gamma": cfg.scheduler_gamma,
-        "rel_tol": cfg.rel_tol,
-        "vn_tol": cfg.vn_tol,
-        "exp_clip": cfg.exp_clip,
-        "damping": cfg.damping,
-        "overrelaxation_factor": cfg.overrelaxation_factor,
-        "experimental_newton_max_steps": cfg.experimental_newton_max_steps,
-        "experimental_newton_tol": cfg.experimental_newton_tol,
-    }
-    for name, value in positive_fields.items():
-        if not math.isfinite(float(value)) or value <= 0:
-            raise ValueError(
-                f"Expected config '{name}' to be finite and positive. "
-                f"Provided value: {value!r}."
+def _validate_finite_layers(layers, *, context: str) -> None:
+    for depth, layer in enumerate(layers, start=1):
+        if not torch.isfinite(layer.state).all():
+            raise FloatingPointError(
+                f"Expected finite {context} state at free layer {depth}."
             )
-    if not math.isfinite(cfg.z_thresh) or cfg.z_thresh <= 1.0:
+
+
+def _validate_relations(cfg: TrainingConfig) -> None:
+    validate_execution_relations(cfg.execution)
+    if cfg.model["topology"] != "dense":
+        raise ValueError("Expected model.topology to be 'dense'.")
+    expected_input = (
+        (128,)
+        if cfg.dataset["source"] == "sklearn_digits"
+        else (2, 28, 28)
+    )
+    if cfg.layer_shapes[0] != expected_input:
         raise ValueError(
-            "Expected config 'z_thresh' to be finite and greater than 1 for the "
-            "large-z Lambert-W expansion. "
-            f"Provided value: {cfg.z_thresh!r}."
+            f"Expected {cfg.dataset['source']} input layer shape {expected_input}, "
+            f"got {cfg.layer_shapes[0]}."
         )
-    if cfg.max_newton_iters < 0:
+    if any(len(shape) != 1 for shape in cfg.layer_shapes[1:]):
         raise ValueError(
-            "Expected config 'max_newton_iters' to be non-negative. "
-            f"Provided value: {cfg.max_newton_iters!r}."
+            "Expected every dense hidden/output layer shape to be one-dimensional."
         )
-    if cfg.adaptive_equilibrium:
+    expected_gains = len(cfg.layer_shapes) - 1
+    if len(cfg.weight_gains) != expected_gains:
         raise ValueError(
-            "Expected config 'adaptive_equilibrium' to be false during training. "
-            f"Provided value: {cfg.adaptive_equilibrium!r}."
+            f"Expected one model.weight_gain per dense matrix ({expected_gains})."
         )
     if cfg.weight_min > cfg.weight_max:
+        raise ValueError("Expected model weight minimum not to exceed maximum.")
+    data_dtype = cfg.dataset["preprocessing"]["dtype"]
+    if data_dtype != cfg.model["state_dtype"]:
         raise ValueError(
-            "Expected config 'weight_min' to be no greater than 'weight_max'. "
-            f"Provided value: weight_min={cfg.weight_min}, weight_max={cfg.weight_max}."
+            "Expected data.preprocessing.dtype to match model.state_dtype. "
+            f"Provided values: {data_dtype!r} and {cfg.model['state_dtype']!r}."
         )
-    if cfg.ep_variant not in {"positive", "negative", "centered"}:
+    if cfg.non_linearity == "single_diode_exponential" and any(
+        shape[0] % 2 for shape in cfg.layer_shapes[1:-1]
+    ):
         raise ValueError(
-            "Expected config 'ep_variant' to be 'positive', 'negative', or 'centered'. "
-            f"Provided value: {cfg.ep_variant!r}."
+            "Expected every single-Shockley hidden width to be even."
         )
-    if cfg.mode not in {"asynchronous", "synchronous", "forward", "backward"}:
+    edges = len(cfg.layer_shapes) - 1
+    hidden_biases = len(cfg.layer_shapes) - 2 if cfg.model["bias"]["enabled"] else 0
+    parameter_count = edges * (2 if cfg.model["signed_weights"] else 1) + hidden_biases
+    if len(cfg.learning_rates) != parameter_count:
         raise ValueError(
-            "Expected config 'mode' to be a supported minimizer mode. "
-            f"Provided value: {cfg.mode!r}."
+            "Expected training.optimizer.learning_rates to contain one value per "
+            f"trainable parameter ({parameter_count}); got {len(cfg.learning_rates)}."
         )
-
-
-def _set_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def _required(data: dict[str, Any], name: str) -> Any:
-    if name not in data or data[name] is None:
+    execution_dtype = cfg.execution["backend"]["default_dtype"]
+    if execution_dtype != cfg.model["state_dtype"]:
         raise ValueError(
-            f"Expected config field '{name}' to be present. Provided value: {data.get(name)!r}."
+            "Expected execution.backend.default_dtype to match model.state_dtype. "
+            f"Provided values: {execution_dtype!r} and "
+            f"{cfg.model['state_dtype']!r}."
         )
-    return data[name]
-
-
-def _required_str(data: dict[str, Any], name: str) -> str:
-    value = _required(data, name)
-    if not isinstance(value, str) or not value.strip():
+    if cfg.equilibrium["method"] != "fixed_sweeps":
         raise ValueError(
-            f"Expected config field '{name}' to be a non-empty string. Provided value: {value!r}."
+            "Expected training equilibrium.method to be 'fixed_sweeps'; adaptive "
+            "phase lengths change the EP estimator protocol."
         )
-    return value.strip()
-
-
-def _required_dict(data: dict[str, Any], name: str) -> dict[str, Any]:
-    value = _required(data, name)
-    if not isinstance(value, dict):
-        raise ValueError(f"Expected config field '{name}' to be an object. Provided value: {value!r}.")
-    return dict(value)
-
-
-def _required_list(data: dict[str, Any], name: str) -> list[Any]:
-    value = _required(data, name)
-    if not isinstance(value, list):
-        raise ValueError(f"Expected config field '{name}' to be a list. Provided value: {value!r}.")
-    return list(value)
-
-
-def _require_keys(data: dict[str, Any], keys: tuple[str, ...], label: str) -> None:
-    missing = [key for key in keys if key not in data]
-    if missing:
+    batch_size = cfg.training["loader"]["batch_size"]
+    drop_last = cfg.training["loader"]["drop_last"]
+    subset = cfg.dataset["subset"]
+    if cfg.dataset["source"] == "sklearn_digits":
+        total = 1797 if subset["method"] == "all" else subset["count"]
+        train_examples = math.floor(cfg.dataset["split"]["train_fraction"] * total)
+        evaluation_examples = total - train_examples
+    else:
+        train_examples = 60000 if subset["method"] == "all" else subset["train_count"]
+        evaluation_examples = (
+            10000 if subset["method"] == "all" else subset["evaluation_count"]
+        )
+    if train_examples < 1 or evaluation_examples < 1:
         raise ValueError(
-            f"Expected config '{label}' to include keys {keys}. "
-            f"Provided value missing: {missing}."
+            "Expected the configured data policy to select at least one training "
+            "and evaluation example."
         )
+    if drop_last and (
+        train_examples < batch_size or evaluation_examples < batch_size
+    ):
+        raise ValueError(
+            "Expected training.loader.drop_last=true to leave at least one full "
+            "training and evaluation batch."
+        )
+    output = cfg.model["output"]
+    if output["classes"] != 10:
+        raise ValueError(
+            f"Expected {cfg.dataset['source']} model.output.classes to be 10; "
+            f"got {output['classes']}."
+        )
+    width = cfg.layer_shapes[-1][0]
+    expected_width = (
+        output["classes"]
+        if output["encoding"] == "single_ended"
+        else 2 * output["classes"]
+    )
+    if width != expected_width:
+        raise ValueError(
+            f"Expected output width {expected_width} for {output!r}, got {width}."
+        )
+    if cfg.equilibrium["initial_state"] != "zeros":
+        raise ValueError("Expected training equilibrium.initial_state to be 'zeros'.")
 
 
-def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+def _input_mode(model: Mapping[str, Any]) -> str:
+    if model["input_encoding"] != "signed_pair":
+        raise ValueError(
+            "Expected model.input_encoding to be 'signed_pair'. "
+            f"Provided value: {model['input_encoding']!r}."
+        )
+    return "train"
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _parse_override(value: str) -> JsonPointerOverride:
+    if "=" not in value:
+        raise ConfigurationOverrideError(
+            "Expected --override JSON_POINTER=JSON_VALUE. "
+            f"Provided value: {value!r}."
+        )
+    pointer, encoded = value.split("=", maxsplit=1)
+    try:
+        parsed = json.loads(
+            encoded,
+            parse_constant=lambda constant: (_raise_non_finite(constant)),
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ConfigurationOverrideError(
+            f"Invalid JSON value in override {value!r}: {exc}."
+        ) from exc
+    return JsonPointerOverride(pointer=pointer, value=parsed)
+
+
+def _raise_non_finite(value: str):
+    raise ValueError(f"non-finite JSON constant {value!r} is not permitted")
 
 
 def _relative_or_absolute(path: Path, root: Path) -> str:
     try:
-        return str(path.relative_to(root))
+        return path.relative_to(root).as_posix()
     except ValueError:
         return str(path)
+
+
+def _capture_source_record(
+    source: Path | Mapping[str, Any],
+    *,
+    repo_root: Path,
+) -> dict[str, str] | None:
+    if isinstance(source, Mapping):
+        return None
+    path = Path(source).expanduser()
+    if not path.is_absolute():
+        path = repo_root / path
+    path = path.resolve()
+    return {
+        "owner": "training_source",
+        "path": _relative_or_absolute(path, repo_root.resolve()),
+        "sha256": sha256_file(path),
+    }
+
+
+def _verify_and_stamp_source(
+    result: CompositionResult,
+    source_record: dict[str, str] | None,
+    *,
+    repo_root: Path,
+) -> None:
+    if source_record is None:
+        return
+    source_path = Path(source_record["path"])
+    if not source_path.is_absolute():
+        source_path = repo_root / source_path
+    if sha256_file(source_path.resolve()) != source_record["sha256"]:
+        raise RuntimeError(
+            "Training source changed while it was being resolved; retry from "
+            "stable source bytes."
+        )
+    sources = result.document["provenance"].setdefault("config_sources", [])
+    if not any(item["owner"] == "training_source" for item in sources):
+        sources.insert(0, source_record)
+    validate_document(result.document, "training-v2.schema.json", repo_root=repo_root)
+
+
+__all__ = [
+    "TrainingConfig",
+    "TrainingResult",
+    "load_training_config",
+    "resolve_training_config",
+    "run_smoke_suite",
+    "run_training",
+]

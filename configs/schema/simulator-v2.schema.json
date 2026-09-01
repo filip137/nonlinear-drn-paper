@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/simulator-v2.schema.json",
+  "title": "Nonlinear DRN simulator profile, version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/simulator-v2.schema.json"},
+    "schema_version": {"const": 2},
+    "kind": {"const": "simulator_profile"},
+    "description": {"type": "string", "minLength": 1},
+    "simulation": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/simulation"
+    },
+    "provenance": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/provenance"
+    }
+  },
+  "required": ["$schema", "schema_version", "kind", "description", "simulation", "provenance"]
+}

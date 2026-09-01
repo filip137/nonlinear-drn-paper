@@ -35,6 +35,8 @@ class DeepResistiveEnergy(SumSeparableFunction):
                  weight_init_mode='kaiming_uniform', conv_pipeline=None,
                  pooling_mode="avg", bias_scale_mode="legacy",
                  bias_interaction_type="linear", signed_weights=False,
+                 bias_enabled=True, bias_initial_value=0.0,
+                 bias_minimum=0.0, bias_maximum=None,
                  learn_voltage_amp=False, learn_current_amp=False,
                  learn_input_gain=False,
                  voltage_amp_min=None, voltage_amp_max=None,
@@ -82,6 +84,10 @@ class DeepResistiveEnergy(SumSeparableFunction):
         self._non_linearity = non_linearity
         self._bias_scale_mode = bias_scale_mode
         self._bias_interaction_type = bias_interaction_type
+        self._bias_enabled = bool(bias_enabled)
+        self._bias_initial_value = bias_initial_value
+        self._bias_minimum = bias_minimum
+        self._bias_maximum = bias_maximum
         self._signed_weights = signed_weights
         # Store diode parameter dictionaries so downstream utilities (e.g., Monitor)
         # can introspect saturation bounds without threading them through manually.
@@ -231,7 +237,20 @@ class DeepResistiveEnergy(SumSeparableFunction):
         free_layers = [layer for layer, mode in zip(convpool_layers, convpool_modes) if mode != "pooling"] + hidden_layers
 
         # build the biases
-        biases = [Bias(layer._shape, 0., device=None) for layer in free_layers]
+        biases = (
+            [
+                Bias(
+                    layer._shape,
+                    self._bias_initial_value,
+                    device=None,
+                    minimum=self._bias_minimum,
+                    maximum=self._bias_maximum,
+                )
+                for layer in free_layers
+            ]
+            if self._bias_enabled
+            else []
+        )
         bias_interactions = [
             build_bias_interaction(
                 layer,

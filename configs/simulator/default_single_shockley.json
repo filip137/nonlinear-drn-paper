@@ -1,23 +1,43 @@
 {
-  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/simulator/schema.json",
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/simulator-v2.schema.json",
   "description": "Default simulator profile for single-Shockley training.",
-  "non_linearity": "single_diode_exponential",
-  "voltage_amp": 4.0,
-  "current_amp": 1.0,
-  "exponential_diode_param": {"I_s": 1e-6, "V_t": 0.05, "V_off": 0.8},
-  "minimizer_impl": "custom",
-  "mode": "asynchronous",
-  "single_diode_updater": "overrelaxed",
-  "double_diode_updater": "float32_overrelaxed",
-  "overrelaxation_factor": 1.2,
-  "adaptive_equilibrium": false,
-  "rel_tol": 1e-5,
-  "vn_tol": 1e-6,
-  "use_polish": false,
-  "max_newton_iters": 32,
-  "z_thresh": 1e10,
-  "exp_clip": 100.0,
-  "damping": 0.5,
-  "experimental_newton_max_steps": 32,
-  "experimental_newton_tol": 1e-5
+  "kind": "simulator_profile",
+  "provenance": {
+    "materialized_defaults": [
+      "simulation.updater.asymptotic_terms",
+      "simulation.updater.backend",
+      "simulation.updater.linear_coefficient_clamp",
+      "simulation.updater.quadratic_coefficient_min"
+    ],
+    "migration": {
+      "from_schema_version": 1,
+      "to_schema_version": 2,
+      "tool": "scripts/migrate_training_configs.py"
+    }
+  },
+  "schema_version": 2,
+  "simulation": {
+    "amplification": {
+      "current_factor": 1.0,
+      "voltage_factor": 4.0
+    },
+    "nonlinearity": "single_diode_exponential",
+    "physical": {
+      "offset_voltage": 0.8,
+      "saturation_current": 1e-06,
+      "thermal_voltage": 0.05
+    },
+    "updater": {
+      "asymptotic_terms": 4,
+      "asymptotic_threshold": 10000000000.0,
+      "backend": "torchlambertw",
+      "dtype": "float64",
+      "exponent_clip": 100.0,
+      "linear_coefficient_clamp": 1000000.0,
+      "method": "lambert_w_v1",
+      "polish": false,
+      "quadratic_coefficient_min": 1e-30,
+      "relaxation": 1.2
+    }
+  }
 }

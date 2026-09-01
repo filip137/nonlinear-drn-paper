@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -7,207 +8,263 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from repro import (
-    DEFAULT_SHOCKLEY_PARAMETERS,
-    SmallNetworkResult,
-    simulate_small_network,
-)
+from repro import make_input_voltage_sweep, simulate_small_network
+from repro.small_network import SmallNetworkResult, load_small_network_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LAYER_SIZES = [2, 4, 2]
-CONDUCTANCES = [
-    np.array(
-        [
-            [1.0, 0.2, 0.8, 0.4],
-            [0.3, 1.1, 0.5, 0.9],
-        ],
-        dtype=np.float32,
-    ),
-    np.array(
-        [
-            [0.8, 0.2],
-            [0.4, 1.0],
-            [1.1, 0.3],
-            [0.2, 0.7],
-        ],
-        dtype=np.float32,
-    ),
-]
-INPUT_VOLTAGES = np.array(
-    [
-        [0.2, -0.1],
-        [0.7, 0.3],
-        [-0.4, 0.8],
-    ],
-    dtype=np.float32,
-)
+EXAMPLE = ROOT / "configs" / "small_network" / "example.json"
 
 
-def _simulate(**overrides) -> SmallNetworkResult:
-    arguments = {
-        "layer_sizes": LAYER_SIZES,
-        "conductances": CONDUCTANCES,
-        "input_voltages": INPUT_VOLTAGES,
-        "non_linearity": "double",
-    }
-    arguments.update(overrides)
-    return simulate_small_network(**arguments)
-
-
-@pytest.mark.parametrize("non_linearity", ["single", "double", "pwl"])
-def test_small_network_supports_each_paper_nonlinearity(
-    non_linearity: str,
-) -> None:
-    result = _simulate(non_linearity=non_linearity)
-
-    assert isinstance(result, SmallNetworkResult)
-    assert result.converged is True
-    assert 1 <= result.sweeps <= 128
-    assert len(result.hidden_voltages) == 1
-    assert result.hidden_voltages[0].shape == (3, 4)
-    assert result.output_voltages.shape == (3, 2)
-    assert np.isfinite(result.hidden_voltages[0]).all()
-    assert np.isfinite(result.output_voltages).all()
-
-
-def test_input_voltages_are_physical_nodes_without_channel_duplication() -> None:
-    result = simulate_small_network(
-        layer_sizes=[2, 2, 1],
-        conductances=[
-            [[1.0, 0.2], [0.3, 1.1]],
-            [[0.8], [1.2]],
-        ],
-        input_voltages=[0.2, -0.1],
-        non_linearity="double",
+def _config(family: str = "double_diode_exponential") -> dict:
+    document = load_small_network_config(EXAMPLE, repo_root=ROOT)
+    profile_name = {
+        "single_diode_exponential": "default_single_shockley.json",
+        "double_diode_exponential": "default_double_shockley.json",
+        "experimental": "default_pwl.json",
+    }[family]
+    profile = json.loads(
+        (ROOT / "configs" / "simulator" / profile_name).read_text(encoding="utf-8")
     )
-
-    assert result.hidden_voltages[0].shape == (1, 2)
-    assert result.output_voltages.shape == (1, 1)
-
-
-def test_small_network_supports_multiple_hidden_layers() -> None:
-    result = simulate_small_network(
-        layer_sizes=[2, 2, 2, 1],
-        conductances=[
-            [[1.0, 0.4], [0.3, 1.2]],
-            [[0.8, 0.2], [0.5, 1.0]],
-            [[0.7], [1.1]],
-        ],
-        input_voltages=[[0.2, -0.1], [0.7, 0.3]],
-        non_linearity="double",
-    )
-
-    assert result.converged is True
-    assert [voltages.shape for voltages in result.hidden_voltages] == [
-        (2, 2),
-        (2, 2),
-    ]
-    assert result.output_voltages.shape == (2, 1)
-
-
-def test_fixed_equilibrium_runs_all_default_sweeps() -> None:
-    result = _simulate(adaptive_equilibrium=False)
-
-    assert result.converged is True
-    assert result.sweeps == 128
-    assert result.final_max_voltage_change <= 1e-6
-
-
-def test_batched_and_individual_inputs_match_in_fixed_mode() -> None:
-    batched = _simulate(adaptive_equilibrium=False)
-    individual = [
-        _simulate(input_voltages=row, adaptive_equilibrium=False)
-        for row in INPUT_VOLTAGES
-    ]
-
-    expected_hidden = np.concatenate(
-        [result.hidden_voltages[0] for result in individual], axis=0
-    )
-    expected_output = np.concatenate(
-        [result.output_voltages for result in individual], axis=0
-    )
-    np.testing.assert_allclose(
-        batched.hidden_voltages[0], expected_hidden, rtol=2e-7, atol=2e-7
-    )
-    np.testing.assert_allclose(
-        batched.output_voltages, expected_output, rtol=2e-7, atol=2e-7
-    )
-
-
-def test_linear_output_is_the_amplified_conductance_weighted_average() -> None:
-    result = _simulate(adaptive_equilibrium=False)
-    output_conductances = CONDUCTANCES[-1]
-    expected = 4.0 * (
-        result.hidden_voltages[0] @ output_conductances
-    ) / output_conductances.sum(axis=0)
-
-    np.testing.assert_allclose(result.output_voltages, expected, rtol=1e-6, atol=1e-6)
-
-
-def test_custom_shockley_dictionary_changes_voltages_without_mutating_default() -> None:
-    default_before = dict(DEFAULT_SHOCKLEY_PARAMETERS)
-    default_result = _simulate()
-    custom_result = _simulate(
-        shockley_parameters={"I_s": 1e-2, "V_t": 0.05, "V_off": 0.8}
-    )
-
-    assert not np.allclose(
-        default_result.output_voltages,
-        custom_result.output_voltages,
-    )
-    assert dict(DEFAULT_SHOCKLEY_PARAMETERS) == default_before
-
-
-def test_sweep_cap_warns_and_returns_latest_voltages() -> None:
-    with pytest.warns(RuntimeWarning, match="did not satisfy"):
-        result = _simulate(max_sweeps=1)
-
-    assert result.converged is False
-    assert result.sweeps == 1
-    assert np.isfinite(result.output_voltages).all()
+    document["simulation"] = profile["simulation"]
+    return document
 
 
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    ("dtype", "numpy_dtype"),
+    (("float32", np.float32), ("float64", np.float64)),
+)
+def test_input_voltage_sweep_builds_cartesian_grid_with_explicit_dtype(
+    dtype: str,
+    numpy_dtype: type[np.generic],
+) -> None:
+    sweep = make_input_voltage_sweep(
+        2,
+        voltage_min=-1.0,
+        voltage_max=1.0,
+        num_points=3,
+        dtype=dtype,
+    )
+    assert sweep.dtype == numpy_dtype
+    np.testing.assert_array_equal(
+        sweep,
+        np.array(
+            [
+                [-1.0, -1.0],
+                [-1.0, 0.0],
+                [-1.0, 1.0],
+                [0.0, -1.0],
+                [0.0, 0.0],
+                [0.0, 1.0],
+                [1.0, -1.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+            ],
+            dtype=numpy_dtype,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
     [
-        ({"layer_sizes": [2, 3, 2], "non_linearity": "single"}, "even"),
-        ({"conductances": [np.ones((2, 3)), CONDUCTANCES[1]]}, "shape"),
         (
             {
-                "conductances": [
-                    np.array([[-1.0, 0.2, 0.8, 0.4], [0.3, 1.1, 0.5, 0.9]]),
-                    CONDUCTANCES[1],
-                ]
+                "input_size": 0,
+                "voltage_min": -1,
+                "voltage_max": 1,
+                "num_points": 3,
+                "dtype": "float32",
             },
-            "non-negative",
+            "positive integer",
         ),
-        ({"input_voltages": [0.2]}, "input_voltages"),
-        ({"shockley_parameters": {"I_s": 1e-6, "V_t": 0.05}}, "exactly"),
-        ({"adaptive_equilibrium": 1}, "boolean"),
-        ({"max_sweeps": 0}, "positive integer"),
-        ({"relative_tolerance": 0.0}, "finite and positive"),
+        (
+            {
+                "input_size": 2,
+                "voltage_min": -1,
+                "voltage_max": 1,
+                "num_points": 1,
+                "dtype": "float32",
+            },
+            "at least 2",
+        ),
+        (
+            {
+                "input_size": 2,
+                "voltage_min": 1,
+                "voltage_max": 1,
+                "num_points": 3,
+                "dtype": "float32",
+            },
+            "greater than",
+        ),
+        (
+            {
+                "input_size": 2,
+                "voltage_min": float("nan"),
+                "voltage_max": 1,
+                "num_points": 3,
+                "dtype": "float32",
+            },
+            "finite",
+        ),
+        (
+            {
+                "input_size": 4,
+                "voltage_min": -1,
+                "voltage_max": 1,
+                "num_points": 100,
+                "dtype": "float32",
+            },
+            "too large",
+        ),
+        (
+            {
+                "input_size": 2,
+                "voltage_min": -1,
+                "voltage_max": 1,
+                "num_points": 3,
+                "dtype": "float16",
+            },
+            "dtype",
+        ),
     ],
 )
-def test_small_network_rejects_invalid_arguments(overrides, message: str) -> None:
+def test_input_voltage_sweep_rejects_invalid_requests(arguments, message: str) -> None:
     with pytest.raises(ValueError, match=message):
-        _simulate(**overrides)
+        make_input_voltage_sweep(**arguments)
 
 
-def test_small_network_rejects_isolated_free_nodes() -> None:
-    isolated_output = CONDUCTANCES[1].copy()
-    isolated_output[:, 1] = 0.0
+@pytest.mark.parametrize(
+    "family",
+    [
+        "single_diode_exponential",
+        "double_diode_exponential",
+        "experimental",
+    ],
+)
+def test_complete_config_supports_each_paper_family(family: str) -> None:
+    result = simulate_small_network(_config(family), repo_root=ROOT)
+    assert isinstance(result, SmallNetworkResult)
+    assert result.converged is True
+    assert 1 <= result.sweeps <= 128
+    assert result.hidden_voltages[0].shape == (3, 4)
+    assert result.output_voltages.shape == (3, 2)
+    assert result.receipt["resolved_config_sha256"]
+    assert result.receipt["execution"]["name"] == "reference_cpu"
 
-    with pytest.raises(ValueError, match="isolated node"):
-        _simulate(conductances=[CONDUCTANCES[0], isolated_output])
+
+def test_config_path_and_object_are_numerically_identical() -> None:
+    from_path = simulate_small_network(EXAMPLE, repo_root=ROOT)
+    from_object = simulate_small_network(_config(), repo_root=ROOT)
+    np.testing.assert_array_equal(
+        from_path.output_voltages,
+        from_object.output_voltages,
+    )
+    assert from_path.receipt["source_documents"][0]["owner"] == "small_network"
+    assert (
+        from_path.receipt["source_documents"][0]["path"]
+        == "configs/small_network/example.json"
+    )
+    assert len(from_path.receipt["source_documents"][0]["sha256"]) == 64
+    assert from_object.receipt["source_documents"] == []
 
 
-def test_small_network_rejects_missing_pwl_curve(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="existing .npz"):
-        _simulate(non_linearity="pwl", iv_data_path=tmp_path / "missing.npz")
+def test_generated_input_rows_are_part_of_the_config() -> None:
+    document = _config()
+    document["network"]["input_voltages"] = make_input_voltage_sweep(
+        2,
+        voltage_min=-1,
+        voltage_max=1,
+        num_points=3,
+        dtype="float32",
+    ).tolist()
+    result = simulate_small_network(document, repo_root=ROOT)
+    assert result.output_voltages.shape == (9, 2)
 
 
-def test_editable_example_runs_without_writing_files(tmp_path: Path) -> None:
+def test_fixed_equilibrium_runs_exact_configured_sweeps() -> None:
+    document = _config()
+    document["equilibrium"] = {
+        "initial_state": "zeros",
+        "method": "fixed_sweeps",
+        "update_order": "asynchronous",
+        "sweeps": 7,
+    }
+    result = simulate_small_network(document, repo_root=ROOT)
+    assert result.sweeps == 7
+    assert result.converged is None
+
+
+def test_physical_parameter_change_is_explicit_and_effective() -> None:
+    baseline = simulate_small_network(_config(), repo_root=ROOT)
+    changed = _config()
+    changed["simulation"]["physical"]["saturation_current"] = 1e-2
+    result = simulate_small_network(changed, repo_root=ROOT)
+    assert not np.allclose(baseline.output_voltages, result.output_voltages)
+
+
+def test_input_gain_is_explicit_and_effective() -> None:
+    baseline = simulate_small_network(_config(), repo_root=ROOT)
+    changed = _config()
+    changed["network"]["input_gain"] = 2.0
+    result = simulate_small_network(changed, repo_root=ROOT)
+    assert not np.array_equal(baseline.output_voltages, result.output_voltages)
+
+
+def test_hostile_scientific_environment_variables_are_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = simulate_small_network(_config(), repo_root=ROOT)
+    monkeypatch.setenv("DRN_B_CLAMP", "2")
+    monkeypatch.setenv("LABS_IV_EXTRAPOLATION", "linear")
+    monkeypatch.setenv("LABS_IV_CURVE_PATH", "/does/not/exist.npz")
+    hostile = simulate_small_network(_config(), repo_root=ROOT)
+    np.testing.assert_array_equal(
+        baseline.output_voltages,
+        hostile.output_voltages,
+    )
+
+
+def test_schema_rejects_aliases_and_unknown_fields() -> None:
+    document = _config()
+    document["simulation"]["nonlinearity"] = "double"
+    with pytest.raises(ValueError, match="nonlinearity"):
+        simulate_small_network(document, repo_root=ROOT)
+    document = _config()
+    document["simulation"]["updater"]["overrelated"] = True
+    with pytest.raises(ValueError, match="updater"):
+        simulate_small_network(document, repo_root=ROOT)
+
+
+def test_runtime_relational_checks_reject_bad_matrix_shape() -> None:
+    document = _config()
+    document["network"]["conductances"][0][0].pop()
+    with pytest.raises(ValueError, match="shape"):
+        simulate_small_network(document, repo_root=ROOT)
+
+
+def test_missing_pwl_curve_fails_before_science() -> None:
+    document = _config("experimental")
+    document["simulation"]["updater"]["curve"] = {
+        "path": "missing.npz",
+        "sha256": "0" * 64,
+    }
+    with pytest.raises(FileNotFoundError, match="configured scientific asset"):
+        simulate_small_network(document, repo_root=ROOT)
+
+
+def test_legacy_granular_api_is_not_accepted() -> None:
+    with pytest.raises(TypeError):
+        simulate_small_network(  # type: ignore[call-arg]
+            layer_sizes=[2, 2, 1],
+            conductances=[[[1, 1], [1, 1]], [[1], [1]]],
+            input_voltages=[[0, 0]],
+            non_linearity="double",
+        )
+
+
+def test_example_script_default_is_read_only(tmp_path: Path) -> None:
     completed = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "small_network.py")],
         cwd=tmp_path,
@@ -215,8 +272,37 @@ def test_editable_example_runs_without_writing_files(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
-
-    assert "hidden_voltages[1]:" in completed.stdout
-    assert "output_voltages:" in completed.stdout
+    assert "input_voltage_sets: 3" in completed.stdout
     assert "converged: True" in completed.stdout
+    assert "config_sha256:" in completed.stdout
     assert list(tmp_path.iterdir()) == []
+
+
+def test_example_script_writes_complete_generated_sweep_config(tmp_path: Path) -> None:
+    generated = tmp_path / "sweep.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "small_network.py"),
+            "--sweep-inputs",
+            "--sweep-min",
+            "-0.5",
+            "--sweep-max",
+            "0.5",
+            "--sweep-points",
+            "3",
+            "--write-config",
+            str(generated),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "input_voltage_sets: 9" in completed.stdout
+    payload = json.loads(generated.read_text())
+    assert payload["schema_version"] == 2
+    assert len(payload["network"]["input_voltages"]) == 9
+    assert payload["provenance"]["generation_overrides"][0]["pointer"] == (
+        "/network/input_voltages"
+    )

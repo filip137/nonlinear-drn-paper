@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/execution-v2.schema.json",
+  "schema_version": 2,
+  "kind": "execution_profile",
+  "description": "Reference deterministic single-process CPU execution policy.",
+  "execution": {
+    "name": "reference_cpu",
+    "backend": {
+      "construction_device": "cpu",
+      "device": "cpu",
+      "default_dtype": "float32"
+    },
+    "determinism": {
+      "float32_matmul_precision": "highest",
+      "torch_deterministic_algorithms": true,
+      "warn_only": false
+    },
+    "threads": {
+      "torch_intraop": 1,
+      "torch_interop": 1,
+      "omp": 1,
+      "blas": 1
+    },
+    "dataloader": {
+      "num_workers": 0,
+      "persistent_workers": false,
+      "pin_memory": false,
+      "prefetch_factor": null,
+      "timeout_seconds": 0.0
+    },
+    "seeding": {
+      "python": "config_seed",
+      "numpy": "config_seed",
+      "torch": "config_seed"
+    }
+  },
+  "provenance": {
+    "source": "Artifact-wide CPU reference policy introduced for schema version 2."
+  }
+}

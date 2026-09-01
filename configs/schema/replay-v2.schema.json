@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/replay-v2.schema.json",
+  "title": "Strict nonlinear-DRN numerical replay configuration, version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "kind": {
+      "const": "replay"
+    },
+    "data": {
+      "$ref": "#/$defs/data"
+    },
+    "model": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/replayModel"
+    },
+    "simulation": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/simulation"
+    },
+    "equilibrium": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/equilibrium"
+    },
+    "execution": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/execution"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "data",
+    "model",
+    "simulation",
+    "equilibrium",
+    "provenance"
+  ],
+  "oneOf": [
+    {
+      "title": "Bundled replay base configuration",
+      "not": {
+        "required": [
+          "execution"
+        ]
+      }
+    },
+    {
+      "title": "Fully expanded executable replay configuration",
+      "required": [
+        "execution"
+      ]
+    }
+  ],
+  "$defs": {
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "const": "digits"
+            },
+            "loader": {
+              "const": "sklearn.datasets.load_digits"
+            }
+          },
+          "required": [
+            "name",
+            "loader"
+          ]
+        },
+        "preprocessing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "input_dtype": {
+              "const": "float32"
+            },
+            "input_scale": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "input_offset": {
+              "type": "number"
+            },
+            "target_dtype": {
+              "const": "int64"
+            }
+          },
+          "required": [
+            "input_dtype",
+            "input_scale",
+            "input_offset",
+            "target_dtype"
+          ]
+        },
+        "subset": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "random_max_points"
+            },
+            "max_points": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "method",
+            "max_points"
+          ]
+        },
+        "split": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "random_fraction"
+            },
+            "train_fraction": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "rounding": {"const": "floor"}
+          },
+          "required": [
+            "method",
+            "train_fraction",
+            "rounding"
+          ]
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "loader": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "batch_size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "shuffle": {
+              "const": false
+            },
+            "drop_last": {"const": false}
+          },
+          "required": [
+            "batch_size",
+            "shuffle",
+            "drop_last"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "preprocessing",
+        "subset",
+        "split",
+        "seed",
+        "loader"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Migration facts and archived fields; scientific runtime code must not read this block.",
+      "properties": {
+        "migration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "const": "legacy_flat_replay_v1"
+            },
+            "tool": {
+              "const": "scripts/migrate_replay_configs.py"
+            }
+          },
+          "required": [
+            "from",
+            "tool"
+          ]
+        },
+        "materialized_defaults": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "historical_unused": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "migration",
+        "materialized_defaults",
+        "historical_unused"
+      ]
+    }
+  },
+  "$comment": "Runtime JSON parsing additionally rejects NaN and infinity before schema validation."
+}

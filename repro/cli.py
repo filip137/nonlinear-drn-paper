@@ -11,21 +11,23 @@ from repro.manifest import PackManifest
 PACK_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _positive_limit(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return parsed
+
+
 def configure_environment() -> None:
     # These variables avoid OpenMP shared-memory failures in restricted runners.
     defaults = {
         "KMP_DISABLE_SHM": "1",
         "KMP_SHM_DISABLE": "1",
-        "OMP_NUM_THREADS": "1",
-        "MKL_NUM_THREADS": "1",
-        "OPENBLAS_NUM_THREADS": "1",
-        "NUMEXPR_NUM_THREADS": "1",
         "MPLBACKEND": "Agg",
         "MPLCONFIGDIR": "/tmp/matplotlib",
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
-    os.environ.setdefault("DRN_B_CLAMP", "1e6")
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,16 +59,20 @@ def parse_args() -> argparse.Namespace:
         "demo",
         help="Evaluate the bundled pretrained Digits model without writing artifacts.",
     )
-    demo.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
 
     train = sub.add_parser("train", help="Train one DRN configuration with equilibrium propagation.")
     train.add_argument("--config", type=Path, required=True)
-    train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     train.add_argument("--output", type=Path, default=None)
-    train.add_argument("--epochs", type=int, default=None)
-    train.add_argument("--num-iterations", type=int, default=None)
-    train.add_argument("--max-batches", type=int, default=None)
-    train.add_argument("--max-eval-batches", type=int, default=None)
+    train.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="JSON_POINTER=JSON_VALUE",
+        help=(
+            "Generate and save a complete resolved config with an explicit JSON "
+            "Pointer replacement before training. May be repeated."
+        ),
+    )
     train.add_argument(
         "--download",
         action="store_true",
@@ -77,13 +83,16 @@ def parse_args() -> argparse.Namespace:
         "train-smoke",
         help="Train one batch with each of the three paper nonlinearities.",
     )
-    smoke.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
 
     for name in ("validate", "compare", "all"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--group", choices=("timing", "error_vs_iter", "vol_tol", "all"), default="all")
-        cmd.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
-        cmd.add_argument("--limit", type=int, default=None, help="Optional smoke-test limit.")
+        cmd.add_argument(
+            "--limit",
+            type=_positive_limit,
+            default=None,
+            help="Optional positive smoke-test limit.",
+        )
         cmd.add_argument("--continue-on-error", action="store_true")
     return parser.parse_args()
 
@@ -109,12 +118,12 @@ def run_many(kind: str, manifest: PackManifest, args: argparse.Namespace) -> int
             if kind == "validate":
                 from repro.digits_validate import run_validation
 
-                result = run_validation(PACK_ROOT, job, device=args.device)
+                result = run_validation(PACK_ROOT, manifest, job)
                 print(f"[validate] {job.job_id} accuracy={result.accuracy:.4f} run_dir={result.run_dir}")
             elif kind == "compare":
                 from repro.npz_compare import compare_job
 
-                summary = compare_job(PACK_ROOT, job)
+                summary = compare_job(PACK_ROOT, manifest, job)
                 if summary is None:
                     print(f"[compare] {job.job_id} skipped: no reference NPZ")
                 else:
@@ -165,6 +174,7 @@ def main() -> int:
                 f"(PyTorch {cuda['torch']}; CUDA {cuda['runtime']}; {cuda['device']})"
             )
         manifest.verify_checksums()
+        manifest.verify_references()
         print("checksums: ok")
         return 0
     if args.command == "figures":
@@ -183,7 +193,7 @@ def main() -> int:
     if args.command == "demo":
         from repro.digits_validate import run_demo
 
-        result = run_demo(PACK_ROOT, manifest, device=args.device)
+        result = run_demo(PACK_ROOT, manifest)
         print(f"demo_job: {result.job_id}")
         print(f"config: {result.config}")
         print(f"weights: {result.weights}")
@@ -191,6 +201,7 @@ def main() -> int:
         print(f"nonlinearity: {result.non_linearity}")
         print(f"iterations: {result.num_iterations}")
         print(f"inference_batch_size: {result.batch_size}")
+        print(f"execution_profile: {result.execution_profile}")
         print(f"device: {result.device}")
         print(f"correct: {result.correct}/{result.total}")
         print(f"accuracy: {100.0 * result.accuracy:.2f}%")
@@ -204,12 +215,8 @@ def main() -> int:
         result = run_training(
             PACK_ROOT,
             config_path,
-            device=args.device,
             output_dir=args.output,
-            epochs=args.epochs,
-            num_iterations=args.num_iterations,
-            max_batches=args.max_batches,
-            max_eval_batches=args.max_eval_batches,
+            overrides=args.override,
             download=args.download,
         )
         print(f"training output: {result.output_dir}")
@@ -217,7 +224,7 @@ def main() -> int:
     if args.command == "train-smoke":
         from repro.train import run_smoke_suite
 
-        results = run_smoke_suite(PACK_ROOT, device=args.device)
+        results = run_smoke_suite(PACK_ROOT)
         print(f"completed {len(results)} nonlinear training smoke runs")
         return 0
     if args.command == "validate":

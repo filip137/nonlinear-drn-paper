@@ -1,162 +1,360 @@
-# Training configuration reference
+# Strict version-2 configuration reference
 
-This document defines the split JSON contract used by `configs/train/`,
-`configs/simulator/`, `repro.train`, and the compact runner in `repro.runner`.
-The machine-readable counterparts are
-[`configs/train/schema.json`](../configs/train/schema.json) and
-[`configs/simulator/schema.json`](../configs/simulator/schema.json).
+This document describes the scientific configuration contract shared by
+training, checkpoint replay, the public demo, and hand-specified small-network
+simulation. The authoritative machine-readable schemas live in
+[`configs/schema/`](../configs/schema/).
 
-The checked paper configurations are scientific provenance records as well as
-executable inputs. Preserve their values when reproducing the paper. For a new
-experiment, use the matching default parameter set or copy a default template
-to `configs/local/`, then inspect the expanded JSON with `--dry-run` before
-training.
+## Design rules
 
-## Composition and provenance
+Version 2 has four invariants:
 
-Each editable default is a training template containing the data, model,
-initialization, optimizer, and fixed-sweep training choices. Its
-`simulator_profile` is a repository-relative path to a second JSON file holding
-the nonlinearity, electrical, amplifier, and coordinate-solver settings. The
-loader merges the two before validation. A setting may not appear in both
-files.
+1. Every scientific value has one owner.
+2. Referenced sources and assets are identified by path and exact SHA-256.
+3. Execution uses a fully expanded, revalidated snapshot.
+4. Runtime APIs do not invent numerical defaults or read scientific values
+   from process environment.
 
-The generated and resolved configurations saved beside each run are fully
-expanded and self-contained: the `simulator_profile` reference is replaced by
-the selected profile values. They also retain
-`simulator_profile_source` and `simulator_profile_sha256`, so the original
-profile path and exact bytes remain auditable.
+JSON parsing rejects duplicate object keys and non-finite constants before
+schema validation. The schemas reject unknown keys, missing required keys,
+wrong types (including numeric strings), and fields belonging to another
+branch of a typed union. JSON does not perform string-to-number or
+integer-to-boolean coercion.
 
-`seed` intentionally remains in the training template. It controls parameter
-initialization, dataset splitting, and loader order; it is not a property of
-the deterministic simulator.
+Every top-level document carries `schema_version: 2` and a `kind` discriminator
+except the replay manifest, whose schema fixes those values without an editor
+`$schema` field. Bundled training, simulator, execution, and small-network
+documents include `$schema` for editor support.
 
-## Dataset-specific defaults and local changes
+## Schema map and ownership
 
-Pass the training JSON matching both dataset and nonlinearity through
-`--parameter-set`:
+| Schema | Kind | Owns |
+|---|---|---|
+| [`training-v2.schema.json`](../configs/schema/training-v2.schema.json) | `training` | data, model, training algorithm, equilibrium |
+| [`simulator-v2.schema.json`](../configs/schema/simulator-v2.schema.json) | `simulator_profile` | device law, amplification, updater |
+| [`execution-v2.schema.json`](../configs/schema/execution-v2.schema.json) | `execution_profile` | device, dtype, determinism, threads, loader workers, seeding |
+| [`replay-v2.schema.json`](../configs/schema/replay-v2.schema.json) | `replay` | replay data/model/simulation/equilibrium |
+| [`manifest-v2.schema.json`](../configs/schema/manifest-v2.schema.json) | `replay_manifest` | job selection, asset refs, execution ref, job overrides |
+| [`small-network-v2.schema.json`](../configs/schema/small-network-v2.schema.json) | `small_network` | literal network plus complete simulation/equilibrium/execution |
+| [`common-v2.schema.json`](../configs/schema/common-v2.schema.json) | definitions only | shared typed blocks and references |
 
-| Dataset | Nonlinearity | Training template | Simulator profile |
-|---|---|---|---|
-| Digits | `single_diode_exponential` | `configs/train/default_single_shockley.json` | `configs/simulator/default_single_shockley.json` |
-| Digits | `double_diode_exponential` | `configs/train/default_double_shockley.json` | `configs/simulator/default_double_shockley.json` |
-| Digits | `experimental` | `configs/train/default_custom_iv.json` | `configs/simulator/default_pwl.json` |
-| MNIST | `single_diode_exponential` | `configs/train/default_mnist_single_shockley.json` | `configs/simulator/default_single_shockley.json` |
-| MNIST | `double_diode_exponential` | `configs/train/default_mnist_double_shockley.json` | `configs/simulator/default_mnist_double_shockley.json` |
-| MNIST | `experimental` | `configs/train/default_mnist_custom_iv.json` | `configs/simulator/default_pwl.json` |
+The training source deliberately does not contain physical or execution
+values. A simulator profile deliberately does not contain equilibrium policy,
+data, or training values. Composition fails if a base and a reference both
+claim the same top-level section.
 
-All six defaults use batch size 10. Only double Shockley has audited MNIST
-paper parameters. The MNIST single-Shockley and PWL templates use
-Digits-derived simulator settings and are starting points for new experiments,
-not paper-MNIST results. Exact MNIST reproduction uses
-`configs/train/mnist_paper_double_shockley.json`.
+## Path-and-hash references
 
-The `default` alias resolves by dataset and nonlinearity. Explicit JSON paths
-are preferred because the source is visible in the command. The paper aliases
-and `--parameter-config` path flag remain available for compatibility.
+A configuration or scientific-asset reference is exactly:
 
-Keep versioned templates unchanged. Put local variants under the git-ignored
-`configs/local/` directory:
-
-```bash
-mkdir -p configs/local
-cp configs/train/default_mnist_single_shockley.json \
-  configs/local/my_mnist_single.json
-# Edit configs/local/my_mnist_single.json before running:
-python scripts/train_drn.py \
-  --dataset mnist \
-  --non-linearity single \
-  --parameter-set configs/local/my_mnist_single.json \
-  --dry-run
+```json
+{
+  "path": "configs/simulator/default_double_shockley.json",
+  "sha256": "6415fbebbf2f3c751f012f03577fee23f92c0a5c95daeb8b861325441c0fdd06"
+}
 ```
 
-For a physical or solver change, copy the profile as well:
+Paths are repository-relative, may not escape with `..`, and must name an
+existing file inside the repository. The resolver hashes the exact file bytes
+before parsing it. A renamed, reformatted, or edited file therefore requires a
+new digest; a matching path alone is insufficient.
 
-```bash
-cp configs/simulator/default_single_shockley.json \
-  configs/local/my_single_simulator.json
-```
+Training sources have `simulation_ref` and `execution_ref`. A measured/PWL
+updater has `curve`, also a path-and-hash reference. The replay manifest hashes
+every base config, weight checkpoint, optional SPICE reference, and its
+execution profile. `data/checksums.sha256` is the separate, artifact-wide
+integrity index; checksums are not duplicated inside the manifest.
 
-Then set the training copy's `simulator_profile` to
-`configs/local/my_single_simulator.json`. Profile references must stay inside
-the repository and are always interpreted relative to its root.
+## Source, expanded snapshot, and receipt
 
-## Numerical settings at a glance
+A training source contains the reference fields and omits inline `simulation`
+and `execution`. Resolution performs this sequence:
 
-The simulator-profile schema records every supported solver family. A field
-can therefore be present but inactive for a particular nonlinearity.
+1. parse and validate the source;
+2. resolve and schema-validate both referenced profiles;
+3. verify their exact hashes;
+4. insert the owned `simulation` and `execution` sections;
+5. add the source records to `provenance.config_sources`; and
+6. validate the expanded document against the training schema again.
 
-| Setting | Single Shockley | Double Shockley | Measured/PWL | Fixed-sweep training |
-|---|---:|---:|---:|---:|
-| `exponential_diode_param` | active | active | inactive | — |
-| `iv_data_path` | inactive | inactive | active | — |
-| `z_thresh` | active for `custom`/`overrelaxed` | active for float32/float64 variants | inactive | — |
-| `exp_clip` | active for `custom`/`overrelaxed` | active for float32/float64 variants | inactive | — |
-| `use_polish` | active for `custom`/`overrelaxed` | active for float32/float64 variants | inactive | — |
-| `max_newton_iters` | active only if `use_polish=true` | active only if `use_polish=true` | inactive | — |
-| `damping` | inactive | inactive | active | — |
-| `experimental_newton_max_steps` | inactive | inactive | active | — |
-| `experimental_newton_tol` | inactive | inactive | active | — |
-| `overrelaxation_factor` | active for `overrelaxed` | active for `*_overrelaxed` | active for `overrelaxed` | — |
-| `rel_tol`, `vn_tol` | — | — | — | inactive because `adaptive_equilibrium=false` |
+The executable snapshot contains inline `simulation` and `execution` and no
+reference fields. It is self-contained: reloading it does not consult the
+original profiles. Training writes it as `config.resolved.json` before loading
+data or constructing the model.
 
-Inactive profile fields do not change the selected updater's computation.
+The snapshot's canonical JSON hash appears in `run_receipt.json`. The receipt
+also records source and asset hashes, data and split fingerprints, git commit
+and dirty-state hash, Python/platform details, all installed package versions,
+the effective execution profile, native threadpools, PyTorch determinism, and
+CUDA runtime/device details when applicable. Receipts describe an execution;
+they never supply values back to it.
 
-## Implementation map
+## Explicit overrides
 
-The solver code is included in this repository rather than imported from the
-larger research workspace. Following the original library layout, every
-coordinate updater and the minimizer selector live in the single canonical
-`model/resistive/minimizer.py` module:
-
-- [`_load_lambertw`](../repro/vendor/model/resistive/minimizer.py#L19) selects
-  `torch.special.lambertw` when available and otherwise the pinned
-  `torchlambertw` backend.
-- [`Float64ExponentialDoubleDiodeUpdater`](../repro/vendor/model/resistive/minimizer.py#L1055)
-  implements the paper's float64 antiparallel double-Shockley update.
-- [`Float32ExponentialDoubleDiodeUpdater`](../repro/vendor/model/resistive/minimizer.py#L1158)
-  implements the mixed-precision alternative.
-- [`ConfigurableExponentialSingleDiodeUpdater`](../repro/vendor/model/resistive/minimizer.py#L1298)
-  implements the forward/reverse single-Shockley split.
-- [`ExperimentalIVCurveUpdater`](../repro/vendor/model/resistive/minimizer.py#L1527)
-  implements the measured/PWL damped-Newton solve.
-- [`QuadraticMinimizer`](../repro/vendor/model/resistive/minimizer.py#L1645)
-  selects the updater from `non_linearity` and the updater-name fields.
-- [`load_iv_data`](../repro/iv_data.py#L12) keeps measured-I-V file loading at
-  the reproduction boundary rather than coupling it to the model module.
-- [`_build_minimizer`](../repro/train.py#L542) passes the checked JSON values
-  into those implementations for training.
-
-Class and function names are the stable navigation points if later edits move
-the linked lines.
-
-## Lambert W, `z`, and `z_thresh`
-
-The Shockley coordinate subproblem has a closed-form solution involving the
-principal real branch of the Lambert W function,
+Scientific CLI changes have the form:
 
 ```text
-W0(z) exp(W0(z)) = z .
+--override JSON_POINTER=JSON_VALUE
 ```
 
-For each node, the updater forms a positive, dimensionless argument of the
-general form
+The pointer follows RFC 6901 and the right-hand side is parsed as JSON. For
+example:
+
+```bash
+--override '/training/epochs=1'
+--override '/model/input_gain=20.0'
+--override '/model/layer_shapes=[[128],[64],[20]]'
+--override '/training/loader/train_shuffle=false'
+```
+
+An override may replace only an existing target. Duplicate pointers,
+parent/child pointer pairs, malformed escapes, non-finite values, generated
+provenance fields, and a result that fails the full schema are rejected. All
+accepted changes are copied to `provenance.generation_overrides` in the
+expanded snapshot. Overrides cannot be stacked on a snapshot that already has
+that generated record; create a new source when another scientific change is
+needed.
+
+Use `scripts/train_drn.py --write-config` to materialize and inspect the
+complete document without loading data or training.
+
+## Canonical vocabulary
+
+Version 2 accepts exact canonical values rather than spelling normalization or
+human-friendly aliases.
+
+| Concept | Canonical values |
+|---|---|
+| Nonlinearity | `single_diode_exponential`, `double_diode_exponential`, `experimental` |
+| Shockley updater | `lambert_w_v1` |
+| Measured/PWL updater | `piecewise_linear_newton_v1` |
+| Equilibrium | `fixed_sweeps`, `voltage_change` |
+| Update order | `asynchronous`, `synchronous`, `forward`, `backward` |
+| State/work dtype | `float32`, `float64` |
+| Output encoding | `single_ended`, `differential_pair` |
+| Training estimator | `positive`, `negative`, `centered` |
+| Bias scale mode | `legacy`, `constant` |
+| Bias interaction | `linear`, `quadratic` |
+
+Precision and overrelaxation are data, not updater names: `updater.dtype`
+chooses the work precision and `updater.relaxation` gives the numerical factor.
+`relaxation: 1.0` is the ordinary coordinate update; values above one
+extrapolate past it and can accelerate or destabilize convergence.
+
+## Training source
+
+A composed training source has these top-level fields:
 
 ```text
-z = I_s / (2 a V_t) * exp(s),
+$schema, schema_version, kind, description,
+data, model, training, equilibrium,
+simulation_ref, execution_ref, provenance
 ```
 
-where `a > 0` is the local quadratic coefficient and `s` depends on the linear
-coefficient, diode orientation, `V_t`, and `V_off`. The exact forward,
-reverse, and antiparallel expressions are implemented in
-`repro/vendor/model/resistive/minimizer.py`.
+An expanded training snapshot replaces the two references with `simulation`
+and `execution`.
 
-`z_thresh` is an **algorithmic branch threshold**, not a physical diode
-parameter and not a clamp on `z`:
+### `data`
 
-- for `z <= z_thresh`, the updater evaluates `W0(z)` with the configured
-  Lambert-W backend in float64;
-- for `z > z_thresh`, it evaluates the four-term large-`z` expansion
+Digits uses:
+
+- `source: sklearn_digits`;
+- an explicit `float32` or `float64` affine preprocessing block (`divisor`,
+  `multiplier`, `offset`); bundled sources use `float32`;
+- `subset`, either `all` or seeded random `count`;
+- a seeded-random split with `train_fraction` and explicit `rounding`;
+  bundled sources use `rounding: floor`; and
+- `seed`, shared by initialization, split, and loader order.
+
+MNIST uses:
+
+- `source: torchvision_mnist` and a repository-relative storage `path`;
+- either `float32` or `float64` `to_tensor`/`normalized_tensor` preprocessing
+  with `mean`, `standard_deviation`, and final `scale`; bundled sources use
+  `float32`;
+- `subset`, either `all` or explicit train/evaluation prefix counts;
+- the official train/evaluation split; and
+- `seed`.
+
+The paper MNIST transform is
+`0.3 * (pixel - 0.1307) / 0.3081`. Dataset download permission is operational
+and remains the explicit `--download` CLI switch.
+
+### `model`
+
+`model` makes the previously implicit construction policy explicit:
+
+- `layer_shapes` includes input, every hidden layer, and output;
+- `state_dtype` must match `execution.backend.default_dtype`;
+- `weight_gains` has one initialization gain per adjacent-layer connection;
+- `weight_bounds` contains `minimum` and `maximum` conductance;
+- `weight_initialization` is `kaiming_uniform` for the bundled sources;
+- `input_gain` is applied after preprocessing and signed input duplication;
+- `bias` fixes whether bias is enabled, scale mode (`legacy` or `constant`),
+  interaction type, initialization, and bounds;
+- `topology: dense`, `input_encoding: signed_pair`, and
+  `amplification_learning` state the construction and trainability policy;
+- `signed_weights` selects one conductance or a positive/negative pair;
+- `output` fixes encoding and class count; and
+- `loss` is the explicit `squared_error`/`mean` policy.
+
+For `H` dense hidden layers with unsigned weights, there are `H+1`
+conductance tensors followed by `H` hidden-bias tensors. The optimizer therefore
+expects `2H+1` learning rates in that parameter order. A zero rate freezes a
+parameter without removing it.
+
+### `training`
+
+`training` contains:
+
+- `epochs`;
+- `batch_limits.train` and `.evaluation`, where `null` means every batch;
+- loader batch size, train/evaluation shuffle, and `drop_last`;
+- equilibrium-propagation variant, nudging magnitude, cost-nudging mode, and
+  standard/alternative gradient formula;
+- the complete SGD policy, including learning rates, momentum, dampening,
+  weight decay, zeroing, Nesterov, maximize, foreach, differentiable, and fused
+  behavior;
+- exponential scheduler `gamma`, initial epoch, and exact `after_epoch`
+  timing; and
+- final/best checkpoint policy, metric/mode, and deterministic tie break.
+
+For example, the bundled one-hidden-layer policies spell out every field
+consumed by PyTorch and the checkpoint selector:
+
+```json
+{
+  "optimizer": {
+    "method": "sgd",
+    "learning_rates": [0.01, 0.01, 0.01],
+    "momentum": 0.0,
+    "dampening": 0.0,
+    "weight_decay": 0.0,
+    "zero_grad_set_to_none": true,
+    "nesterov": false,
+    "maximize": false,
+    "foreach": false,
+    "differentiable": false,
+    "fused": false
+  },
+  "scheduler": {
+    "method": "exponential",
+    "gamma": 1.0,
+    "step_timing": "after_epoch",
+    "initial_epoch": -1
+  },
+  "checkpoint": {
+    "save_final": true,
+    "save_best": {
+      "metric": "evaluation_accuracy",
+      "mode": "max",
+      "tie_break": "first"
+    }
+  }
+}
+```
+
+`tie_break: first` means that an equal best metric retains the earliest
+checkpoint rather than replacing it.
+
+Data-loader worker count, persistence, and pinned-memory policy live in the
+execution profile, not the training block.
+
+### `equilibrium`
+
+The fixed-budget form is:
+
+```json
+{
+  "initial_state": "zeros",
+  "method": "fixed_sweeps",
+  "update_order": "asynchronous",
+  "sweeps": 4
+}
+```
+
+The adaptive form is:
+
+```json
+{
+  "initial_state": "zeros",
+  "method": "voltage_change",
+  "update_order": "asynchronous",
+  "max_sweeps": 128,
+  "relative_tolerance": 1e-5,
+  "absolute_tolerance": 1e-6
+}
+```
+
+The adaptive stop condition is
+
+```text
+max_abs_voltage_change
+    <= relative_tolerance * max_abs_previous_voltage
+       + absolute_tolerance.
+```
+
+Both branches declare `initial_state`; version 2 currently supports the exact
+value `zeros`. Training sources use fixed sweeps so every free and nudged phase
+has the same declared coordinate-update budget. Replay and small-network
+configs may use either branch. `fixed_sweeps` supports all four declared update orders;
+`voltage_change` requires `asynchronous`, because the other minimizer orders do
+not implement adaptive stopping. Inactive tolerances do not appear in a
+fixed-sweep block.
+
+## Simulator profile
+
+A simulator profile contains only:
+
+```text
+$schema, schema_version, kind, description, simulation, provenance
+```
+
+`simulation` is a strict union discriminated by `nonlinearity`. Every branch
+contains `amplification.voltage_factor` and `.current_factor`, plus exactly one
+physical and updater block.
+
+### Shockley physical block
+
+Single and double Shockley use:
+
+```json
+{
+  "saturation_current": 1e-6,
+  "thermal_voltage": 0.05,
+  "offset_voltage": 0.8
+}
+```
+
+These are the physical `I_s`, `V_t`, and voltage offset expressed with
+unambiguous names. The updater has:
+
+- `method: lambert_w_v1`;
+- explicit `backend` and work `dtype`;
+- `relaxation`;
+- `linear_coefficient_clamp`;
+- `exponent_clip`;
+- `asymptotic_threshold` and fixed `asymptotic_terms: 4`; and
+- `polish`, either `false` or the family-specific typed Newton policy.
+
+Single Shockley uses its implemented canonical float64 path and additionally
+declares `quadratic_coefficient_min`. Its polish block has absolute and relative
+residual tolerances. Double Shockley permits float32 or float64 work and its
+polish uses an explicit batch-scaled absolute residual rule and coefficient.
+Those fields cannot appear in the other family.
+
+### Lambert W threshold and exponent clip
+
+The coordinate solution uses the principal real Lambert-W branch,
+
+```text
+W0(z) exp(W0(z)) = z,
+z = I_s / (2 a V_t) * exp(s).
+```
+
+`asymptotic_threshold` is a branch threshold, not a clamp on `z`. At or below
+the threshold, the configured backend evaluates `W0`; above it, the updater
+uses the declared four-term large-argument expansion:
 
 ```text
 L1 = log(z)
@@ -167,196 +365,125 @@ W0(z) ≈ L1 - L2
         + L2(6 - 9 L2 + 2 L2²) / (6 L1³).
 ```
 
-The asymptotic path avoids asking a general Lambert-W implementation to handle
-extreme arguments while retaining increasing accuracy as `z` grows. Relative
-errors of this four-term expression, evaluated against SciPy's principal
-branch, are approximately:
+`exponent_clip` separately limits the argument supplied to `exp`. It can alter
+the current-balance equation when reached and is therefore a scientific
+setting. The paper float64 double-Shockley profiles use 165; the single profile
+uses 100. Float32 has much less exponent headroom and must be validated at its
+intended operating range.
 
-| `z` | Relative error |
-|---:|---:|
-| `1e4` | `2.3e-5` |
-| `1e8` | `2.7e-6` |
-| `1e10` | `1.1e-6` |
-| `1e12` | `5.2e-7` |
+The Lambert-W value is already a closed-form coordinate solution. A configured
+polish performs bounded Newton residual corrections; `polish: false` omits all
+polish-only fields and work.
 
-The paper configurations use `z_thresh=1e10`. Lowering the threshold sends
-more nodes through the faster asymptotic formula but uses it where it is less
-accurate. Raising it sends more nodes through the backend and should be treated
-as a numerical-method change. The runtime requires `z_thresh > 1`; values near
-one are mathematically legal for `W0` but unsuitable for this large-argument
-series.
+### Measured/PWL branch
 
-## `exp_clip`: a separate overflow guard
-
-Before constructing `z`, the updater limits the dimensionless exponential
-argument `s` to `[-exp_clip, exp_clip]` where both signs are needed. Thus,
-unlike `z_thresh`, this value can alter the computed current-balance equation
-when the guard is reached:
-
-```text
-z = I_s / (2 a V_t) * exp(clip(s, -exp_clip, exp_clip)).
-```
-
-It protects `exp(s)` from overflow and non-finite coordinate updates. Useful
-reference values are `exp(100) ≈ 2.69e43` and `exp(165) ≈ 4.56e71`. Float64
-overflows near an exponent of 709.8, whereas float32 overflows near 88.7.
-Consequently, a double-Shockley `float32` updater should use a substantially
-smaller clip, commonly around 80, unless its full operating range has been
-validated. The paper's double-Shockley training presets use float64 and
-`exp_clip=165`.
-
-Increasing `exp_clip` preserves a wider range of the nominal Shockley equation
-but reduces the overflow margin. Decreasing it improves robustness but can
-clip physically meaningful currents. A changed value is therefore part of the
-experiment definition and must be reported with results.
-
-## Optional Newton polish
-
-The Lambert-W result is already the closed-form coordinate solution. Setting
-`use_polish=true` additionally evaluates the original current-balance residual
-and applies up to `max_newton_iters` Newton corrections. This can reduce
-residual error from the asymptotic branch or finite precision, but adds work
-and can be less robust when an exponent is already near its clip.
-
-The paper training presets use:
+The physical block is exactly:
 
 ```json
-"use_polish": false,
-"max_newton_iters": 32
+{"representation": "measured_piecewise_linear"}
 ```
 
-With polishing disabled, `max_newton_iters` is retained as provenance but is
-inactive. Setting it to zero is valid and disables correction even if
-`use_polish=true`.
+Its `piecewise_linear_newton_v1` updater contains:
 
-## Measured/PWL Newton settings
+- a hashed `curve` reference;
+- `extrapolation`, either `clamp` or `linear`;
+- `nonconvergence_policy`, either `accept_last` or `error`;
+- Newton `damping`, `max_steps`, and `voltage_tolerance`; and
+- post-solve `relaxation`.
 
-The measured nonlinearity loads voltage and current samples from
-`iv_data_path`, interpolates each segment linearly, and solves the local
-current-balance equation iteratively.
-
-Set `iv_data_path` in a copied `configs/simulator/default_pwl.json` when the
-curve belongs to a reusable local simulator profile, then point the copied
-Digits or MNIST training template at that profile. To leave the profile
-unchanged or try another curve for one run, pass `--iv-data-path PATH`; the
-command-line value overrides the profile field.
-
-The `.npz` file must contain either one-dimensional `i` and `v` arrays of equal
-length, or one `iv` array shaped `(2, N)` with current in row 0 and voltage in
-row 1. Both layouts require at least two real numeric, finite samples. Voltage
-must be strictly increasing and current must be nondecreasing; the loader
-rejects invalid ordering rather than sorting or changing the curve. The compact
-runner can replace the source curve with `--iv-data-path PATH` (or
-`DRNRunSpec.iv_data_path`) only when the selected nonlinearity is measured/PWL.
-Relative paths are resolved from the repository root. Paths inside the
-repository are serialized relative to its root, external paths remain
-absolute, and the generated metadata records `runner.iv_data_source` as `user`
-or `parameter-source`.
-
-- `damping` multiplies the Newton step. `1` is a full step; values between zero
-  and one damp potentially unstable steps.
-- `experimental_newton_max_steps` caps work per coordinate update.
-- `experimental_newton_tol` stops when the absolute voltage change between
-  consecutive steps falls below the configured value.
-- `overrelaxation_factor` is applied after the PWL coordinate solve only when
-  `double_diode_updater` is `overrelaxed`.
-
-These settings are unrelated to Lambert W. Conversely, `z_thresh`,
-`exp_clip`, `use_polish`, and `max_newton_iters` do not affect measured/PWL
-runs.
-
-## Equilibrium iteration settings
-
-Training requires the simulator profile's `adaptive_equilibrium=false`. Every
-free and nudged phase therefore performs exactly the training template's
-`num_iterations` coordinate-descent sweeps. This is important for reproducing
-the paper's computational budget and gradient estimator.
-
-When `num_iterations` is omitted from the compact runner, Digits uses four
-sweeps for one hidden layer, eight for two or three, and the selected parameter
-source's value for four or more. An explicit value always wins. The checked
-JSON configurations remain literal records and do not apply these runner-only
-depth defaults.
-
-`rel_tol` and `vn_tol` define the adaptive infinity-norm stopping condition
+The asset must contain equal-length 1-D `i` and `v` arrays or one `(2, N)` `iv`
+array with current first. It needs at least two real finite samples, strictly
+increasing voltage, and nondecreasing current. The loader never sorts or
+repairs a curve. The updater interpolates `I(v)` and solves
 
 ```text
-max_abs_voltage_change <= rel_tol * max_abs_previous_voltage + vn_tol.
+2 a v + b + I(v) = 0.
 ```
 
-They are retained in simulator profiles and expanded configurations for
-compatibility with numerical replay but are inactive during training. They must
-not be interpreted as a claim that the fixed-sweep training phases converged to
-those tolerances.
+If Newton reaches `max_steps` without meeting `voltage_tolerance`, `error`
+raises immediately; `accept_last` continues with the last finite iterate. The
+bundled migrated profile explicitly preserves the historical `accept_last`
+behavior.
 
-## Updater and ordering fields
+Lambert-W, Shockley-polish, and exponent fields are invalid in this branch.
 
-| Field | Meaning |
-|---|---|
-| `minimizer_impl` | Archived compatibility selector. The value `custom` resolves to the canonical `model.resistive.minimizer.QuadraticMinimizer`; it no longer names a separate module or class. |
-| `mode` | Layer-update ordering. Paper presets use asynchronous odd-even block updates. |
-| `single_diode_updater` | Selects `custom`, `standard`, or `overrelaxed` when the single-Shockley nonlinearity is active. |
-| `double_diode_updater` | Selects float precision/overrelaxation for double Shockley; for measured/PWL it selects `standard` or `overrelaxed`. |
-| `overrelaxation_factor` | SOR-style factor `omega` in `v_new = v_old + omega * (v_cd - v_old)`. It is inactive for a non-overrelaxed updater. |
+## Execution profiles
 
-`omega=1` is the ordinary coordinate update. Values above one extrapolate past
-it and can accelerate or destabilize convergence depending on the network.
-The checked paper values should be used for reproduction rather than assumed
-to transfer to arbitrary architectures.
+Bundled profiles are documented under
+[`configs/execution/`](../configs/execution/README.md). Both fix:
 
-## Training-template fields
+- backend device, CPU construction device, and default dtype;
+- deterministic-algorithm policy and whether warnings are allowed;
+- PyTorch intra/inter-op and OMP thread counts plus one `blas` count applied to
+  both MKL and OpenBLAS;
+- data-loader workers, persistence, pinned memory, prefetch factor, and
+  timeout; and
+- Python, NumPy, and PyTorch seeding from the config seed.
 
-| Field | Meaning |
-|---|---|
-| `simulator_profile` | Repository-relative path to the physical/solver profile; required by editable split templates. |
-| `dataset` | Digits or MNIST selection, subset controls, and normalization. |
-| `layer_shapes` | Input, hidden, and output tensor shapes. Inputs are duplicated into positive/negative channels. |
-| `weight_gains` | One conductance-initialization gain per connection between adjacent layers. |
-| `weight_min`, `weight_max` | Conductance bounds enforced after every optimizer update. |
-| `weight_init_mode` | Conductance initialization rule. |
-| `input_gain` | Input multiplier after preprocessing and signed duplication. |
-| `batch_size` | Mini-batch size. |
-| `num_epochs` | Complete passes over the training split. |
-| `num_iterations` | Fixed coordinate-descent sweeps per free or nudged phase. |
-| `learning_rates` | Optimizer rates in conductance-tensor order followed by hidden-bias order. |
-| `scheduler_gamma` | Multiplicative rate decay after each epoch; `1` disables decay. |
-| `nudging` | Magnitude of the equilibrium-propagation perturbation. |
-| `ep_variant` | Positive, negative, or centered equilibrium-propagation estimator. |
-| `seed` | Initialization, data-split, and loader-order seed; intentionally training-side rather than simulator-side. |
+The CUDA branch additionally fixes device index, cuDNN deterministic and
+benchmark flags, TF32, and `CUBLAS_WORKSPACE_CONFIG`. A deterministic operation
+that is unavailable fails rather than selecting another algorithm silently.
 
-## Simulator-profile fields
+## Migration provenance
 
-| Field | Meaning |
-|---|---|
-| `non_linearity` | Canonical grounded-element choice. It must match the runner's requested nonlinearity. |
-| `voltage_amp`, `current_amp` | Inter-layer amplifier factors used by the electrical model. |
-| `exponential_diode_param.I_s` | Shockley reverse saturation current in simulator electrical units. |
-| `exponential_diode_param.V_t` | Shockley thermal-voltage scale. |
-| `exponential_diode_param.V_off` | Voltage offset or turn-on shift. |
-| `iv_data_path` | Measured/PWL `.npz` source containing 1-D `i` and `v`, or `(2, N)` `iv` in current-then-voltage order; relative paths resolve from the repository root. |
-| `mode`, updater selectors, and `overrelaxation_factor` | Coordinate-update ordering and updater choice. |
-| `adaptive_equilibrium`, `rel_tol`, `vn_tol` | Equilibrium stopping policy; adaptive equilibrium must be false for training. |
-| `z_thresh`, `exp_clip`, `use_polish`, `max_newton_iters` | Shockley numerical controls. |
-| `damping`, `experimental_newton_max_steps`, `experimental_newton_tol` | Measured/PWL Newton controls. |
+Migration metadata is descriptive and is never read as scientific input. Each
+bundled migrated simulator or training source records
+`provenance.migration.tool`, `.from_schema_version`, and `.to_schema_version`.
+Its sorted `provenance.materialized_defaults` array names the exact active
+fields whose effective version-1 values had lived in code, runtime fallbacks,
+or implicit construction policy. The list is family- and dataset-specific: for
+example, only Digits sources name affine preprocessing and split rounding, only
+single-Shockley profiles name `quadratic_coefficient_min`, and only the PWL
+profile names extrapolation and nonconvergence policy.
 
-For `H` hidden layers, the dense runner expects `H+1` conductance rates followed
-by `H` hidden-bias rates, for `2H+1` values total. The MNIST paper preset's
-effective ordering is documented separately in `docs/MNIST_REPRODUCTION.md`.
+`scripts/migrate_training_configs.py` rewrites the four simulator profiles
+first, embeds their resulting exact hashes in all ten training sources, checks
+that every provenance path exists, validates each source and nested reference,
+and is byte-idempotent. Any future migration must preserve that order so
+downstream hashes describe the final profile bytes.
 
-## Validation and archived configurations
+## Replay and manifest
 
-The runtime rejects unknown or duplicate simulator-profile fields, profile
-references outside the repository, non-positive tolerances and clip values,
-`z_thresh <= 1`, negative Shockley polish counts, non-positive measured/PWL
-step limits, malformed or nonmonotone I-V data, and training configurations
-that enable adaptive equilibrium. Error messages state the expected format
-before reporting the provided value.
+All archived replay bases are explicit version-2 `replay` documents. Historical
+keys that were never consumed by science code live only under
+`provenance.historical_unused`. Values that were formerly implicit are listed
+under `provenance.materialized_defaults`.
 
-The JSON files below `data/error_vs_iter/configs/` and
-`data/timing/configs/` are archived numerical-replay records rather than
-editable training templates. They may contain historical instrumentation keys
-such as `dynamic_polish` or Anderson-acceleration settings. Only fields loaded
-by `repro.config.RuntimeConfig` affect standalone replay; the extra keys are
-retained for provenance. Historical replay records can also retain legacy
-`quadratic_diode_param` and `hard_sigmoid_param` fields; neither belongs in the
-current split training templates.
+`data/manifest.json` names each base config and artifact by hash. A job override
+owns only the swept equilibrium limit, eliminating duplicated family, depth,
+tolerance, and relaxation labels. The manifest also declares the demo job,
+demo batch size, and execution-profile reference. The runtime validates the
+base, applies the typed job change, inserts execution, and validates the
+expanded replay snapshot before loading weights.
+
+## Small-network document
+
+A `small_network` document is already fully expanded. Its `network` block
+contains literal `layer_sizes`, conductance matrices, input-voltage rows,
+`input_gain`, explicit `bias: {"method": "none"}`, `seed`, and `state_dtype`;
+it then embeds complete `simulation`, `equilibrium`, and `execution` blocks.
+There are no numerical function arguments and no fallback defaults.
+`simulate_small_network` accepts only a validated mapping or JSON path and
+returns voltages, convergence information, and an in-memory receipt without
+writing files.
+
+See the checked
+[`configs/small_network/example.json`](../configs/small_network/example.json)
+for a complete document.
+
+## Validation and local variants
+
+Keep bundled sources unchanged. Put generated experiments under the
+git-ignored `configs/local/` directory. When a referenced file changes, update
+both path and digest. A convenient audit is:
+
+```bash
+sha256sum configs/local/my_profile.json
+python scripts/train_drn.py \
+  --config configs/local/my_training.json \
+  --write-config configs/local/my_training.resolved.json
+```
+
+The second command validates the source and every reference, writes a complete
+snapshot, and exits before scientific work. It is the recommended boundary
+between configuration generation and execution.

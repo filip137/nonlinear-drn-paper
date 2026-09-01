@@ -16,131 +16,192 @@ from model.minimizer.minimizer import LayerUpdater, Minimizer
 from model.resistive.layer import ConvLayer, NonlinearResistiveLayer
 
 
-def _load_lambertw():
-    if hasattr(torch, "special") and hasattr(torch.special, "lambertw"):
-        return torch.special.lambertw
-    try:
-        import torchlambertw.special as tw_special
-        return tw_special.lambertw
-    except Exception as exc:
-        def _missing_lambertw(*args, _import_error=exc, **kwargs):
+def _load_lambertw_backend(backend: str):
+    """Load exactly the Lambert-W implementation selected by configuration."""
+
+    if backend == "torch_special":
+        if hasattr(torch, "special") and hasattr(torch.special, "lambertw"):
+            return torch.special.lambertw
+        raise ImportError(
+            "Configured Lambert-W backend 'torch_special' is unavailable in this "
+            "PyTorch build; select 'torchlambertw' or install a PyTorch build that "
+            "provides torch.special.lambertw."
+        )
+    if backend == "torchlambertw":
+        try:
+            import torchlambertw.special as tw_special
+        except Exception as exc:
             raise ImportError(
-                "Lambertw backend unavailable; install torchlambertw or use a PyTorch build "
-                "with torch.special.lambertw."
-            ) from _import_error
-
-        return _missing_lambertw
-
-
-lambertw = _load_lambertw()
-
-
-NONLINEARITY_ALIASES = {
-    "doublediodeexponential": "double_diode_exponential",
-    "singlediodeexponential": "single_diode_exponential",
-    "experimental": "experimental",
-}
-
-DOUBLE_DIODE_UPDATER_ALIASES = {
-    "custom": "float64",
-    "float64": "float64",
-    "float32": "float32",
-    "float64overrelaxed": "float64_overrelaxed",
-    "float32overrelaxed": "float32_overrelaxed",
-    "overrelaxed": "float32_overrelaxed",
-    "overrelated": "float32_overrelaxed",
-}
-
-SINGLE_DIODE_UPDATER_ALIASES = {
-    "custom": "custom",
-    "standard": "standard",
-    "overrelaxed": "overrelaxed",
-    "overrelated": "overrelaxed",
-}
-
-EXPERIMENTAL_UPDATER_ALIASES = {
-    "standard": "standard",
-    "custom": "standard",
-    "overrelaxed": "overrelaxed",
-    "overrelated": "overrelaxed",
-}
+                "Configured Lambert-W backend 'torchlambertw' is unavailable; "
+                "install the repository's torchlambertw dependency."
+            ) from exc
+        return tw_special.lambertw
+    raise ValueError(
+        "Expected lambertw_backend to be 'torchlambertw' or 'torch_special'. "
+        f"Provided value: {backend!r}."
+    )
 
 
 class NonFiniteDiodeError(FloatingPointError):
     """Raised when a diode update produces non-finite voltages."""
 
 
-def _resolve_b_clip_from_env() -> float | None:
-    value = os.environ.get("DRN_B_CLAMP")
-    return float(value) if value is not None else None
+def _require_finite_tensor(tensor, *, context):
+    if not torch.isfinite(tensor).all():
+        raise NonFiniteDiodeError(f"{context}: produced a non-finite tensor.")
+    return tensor
 
 
-def _canonical_name(value: object, aliases: dict[str, str], *, field: str) -> str:
-    key = str(value).strip().lower().replace("-", "_").replace(" ", "_")
-    compact_key = key.replace("_", "")
-    if compact_key in aliases:
-        return aliases[compact_key]
-    expected = ", ".join(sorted(set(aliases.values())))
-    raise ValueError(f"Expected {field} to be one of {expected}. Provided value: {value!r}.")
+def _require_choice(value: object, choices: tuple[str, ...], *, field: str) -> str:
+    """Reject aliases, spelling normalization, and missing selectors."""
+
+    if not isinstance(value, str) or value not in choices:
+        expected = ", ".join(repr(choice) for choice in choices)
+        raise ValueError(
+            f"Expected {field} to be exactly one of {expected}. "
+            f"Provided value: {value!r}."
+        )
+    return value
 
 
-@dataclass
+@dataclass(frozen=True)
 class MinimizerSettings:
-    """Numerical settings shared by the paper's nonlinear updaters."""
+    """Complete numerical policy for the paper's nonlinear updaters.
 
-    rel_tol: float
-    vn_tol: float
-    use_polish: bool
-    max_newton_iters: int
-    z_thresh: float
-    exp_clip: float
-    experimental_newton_tol: float = 1e-5
+    Every field is required so constructing a minimizer cannot silently select a
+    numerical default or inherit process environment state.
+    """
+
+    rel_tol: float | None
+    vn_tol: float | None
+    use_polish: bool | None
+    max_newton_iters: int | None
+    z_thresh: float | None
+    exp_clip: float | None
+    experimental_newton_tol: float | None
+    b_clamp: float | None
+    pwl_extrapolation: str | None
+    pwl_nonconvergence_policy: str | None
+    lambertw_backend: str | None
+    lambertw_asymptotic_terms: int | None
+    single_diode_min_a: float | None
+    single_diode_polish_abs_tol: float | None
+    single_diode_polish_rel_tol: float | None
+    double_diode_polish_residual_tol: float | None
 
     def __post_init__(self):
-        if not isinstance(self.use_polish, bool):
+        if self.use_polish is not None and not isinstance(self.use_polish, bool):
             raise ValueError(
                 "Expected use_polish to be a boolean. "
                 f"Provided value: {self.use_polish!r}."
             )
-        self.rel_tol = float(self.rel_tol)
-        self.vn_tol = float(self.vn_tol)
-        self.max_newton_iters = int(self.max_newton_iters)
-        self.z_thresh = float(self.z_thresh)
-        self.exp_clip = float(self.exp_clip)
-        self.experimental_newton_tol = float(self.experimental_newton_tol)
+        numeric_fields = {
+            "rel_tol": self.rel_tol,
+            "vn_tol": self.vn_tol,
+            "z_thresh": self.z_thresh,
+            "exp_clip": self.exp_clip,
+            "experimental_newton_tol": self.experimental_newton_tol,
+            "b_clamp": self.b_clamp,
+            "single_diode_min_a": self.single_diode_min_a,
+            "single_diode_polish_abs_tol": self.single_diode_polish_abs_tol,
+            "single_diode_polish_rel_tol": self.single_diode_polish_rel_tol,
+            "double_diode_polish_residual_tol": self.double_diode_polish_residual_tol,
+        }
+        for name, value in numeric_fields.items():
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"Expected {name} to be a JSON number. Provided value: {value!r}."
+                )
+        if self.max_newton_iters is not None and (
+            isinstance(self.max_newton_iters, bool)
+            or not isinstance(self.max_newton_iters, int)
+        ):
+            raise ValueError(
+                "Expected max_newton_iters to be an integer. "
+                f"Provided value: {self.max_newton_iters!r}."
+            )
+        if self.lambertw_asymptotic_terms is not None and (
+            isinstance(self.lambertw_asymptotic_terms, bool)
+            or not isinstance(self.lambertw_asymptotic_terms, int)
+        ):
+            raise ValueError(
+                "Expected lambertw_asymptotic_terms to be an integer. "
+                f"Provided value: {self.lambertw_asymptotic_terms!r}."
+            )
         positive_fields = {
             "rel_tol": self.rel_tol,
             "vn_tol": self.vn_tol,
             "exp_clip": self.exp_clip,
             "experimental_newton_tol": self.experimental_newton_tol,
+            "b_clamp": self.b_clamp,
+            "single_diode_min_a": self.single_diode_min_a,
+            "single_diode_polish_abs_tol": self.single_diode_polish_abs_tol,
+            "single_diode_polish_rel_tol": self.single_diode_polish_rel_tol,
+            "double_diode_polish_residual_tol": self.double_diode_polish_residual_tol,
         }
         for name, value in positive_fields.items():
+            if value is None:
+                continue
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(
                     f"Expected {name} to be finite and positive. "
                     f"Provided value: {value!r}."
                 )
-        if not math.isfinite(self.z_thresh) or self.z_thresh <= 1.0:
+        if self.z_thresh is not None and (
+            not math.isfinite(self.z_thresh) or self.z_thresh <= 1.0
+        ):
             raise ValueError(
                 "Expected z_thresh to be finite and greater than 1 for the large-z "
                 "Lambert-W expansion. "
                 f"Provided value: {self.z_thresh!r}."
             )
-        if self.max_newton_iters < 0:
+        if self.max_newton_iters is not None and self.max_newton_iters < 0:
             raise ValueError(
                 "Expected max_newton_iters to be non-negative. "
                 f"Provided value: {self.max_newton_iters!r}."
             )
+        if self.lambertw_asymptotic_terms is not None and not (
+            1 <= self.lambertw_asymptotic_terms <= 4
+        ):
+            raise ValueError(
+                "Expected lambertw_asymptotic_terms to be between 1 and 4. "
+                f"Provided value: {self.lambertw_asymptotic_terms!r}."
+            )
+        if self.pwl_extrapolation is not None:
+            _require_choice(
+                self.pwl_extrapolation,
+                ("clamp", "linear"),
+                field="pwl_extrapolation",
+            )
+        if self.pwl_nonconvergence_policy is not None:
+            _require_choice(
+                self.pwl_nonconvergence_policy,
+                ("accept_last", "error"),
+                field="pwl_nonconvergence_policy",
+            )
+        if self.lambertw_backend is not None:
+            _require_choice(
+                self.lambertw_backend,
+                ("torchlambertw", "torch_special"),
+                field="lambertw_backend",
+            )
 
 
-DEFAULT_MINIMIZER_SETTINGS = MinimizerSettings(
-    rel_tol=1e-5,
-    vn_tol=1e-6,
-    use_polish=True,
-    max_newton_iters=32,
-    z_thresh=1e10,
-    exp_clip=165.0,
-)
+def _require_settings(
+    settings: MinimizerSettings,
+    fields: tuple[str, ...],
+    *,
+    context: str,
+) -> None:
+    missing = [name for name in fields if getattr(settings, name) is None]
+    if missing:
+        raise ValueError(
+            f"Expected explicit {context} minimizer settings {missing}. "
+            "Inactive settings must be None; active settings must come from the "
+            "resolved configuration."
+        )
 
 
 _CONV_LAYER_TYPES = (ConvLayer,)
@@ -210,18 +271,16 @@ class AdaptiveQuadraticUpdater(QuadraticUpdater):
         Computes the value of the layer that achieves the minimum of the function, given other variables fixed.
     """
 
-    def __init__(self, layer, fn, diode_params):
+    def __init__(self, layer, fn, diode_params, *, b_clamp: float):
         super().__init__(layer, fn)
         self._diode_conductance = diode_params["diode_conductance"]
         # Optional off region (deadband) around 0V where no penalty is applied.
         self._v_off = float(diode_params.get("v_off", 0.0))
-        b_clip_env = os.environ.get("DRN_B_CLAMP")
-        self._b_clip = float(b_clip_env) if b_clip_env is not None else None
+        self._b_clip = float(b_clamp)
 
     def pre_activate(self):
         b = self._b()
-        if self._b_clip is not None:
-            b = b.clamp(min=-self._b_clip, max=self._b_clip)
+        b = b.clamp(min=-self._b_clip, max=self._b_clip)
         a = self._a()
         if torch.is_tensor(a):
             a = a.expand_as(b)
@@ -386,16 +445,15 @@ class ExponentialExactDoubleDiodeUpdater(QuadraticUpdater):
     Exact antiparallel exponential diodes (sinh model) solved by safeguarded Newton.
     """
 
-    def __init__(self, layer, fn, diode_params):
+    def __init__(self, layer, fn, diode_params, *, b_clamp: float):
         super().__init__(layer, fn)
         self._Is = diode_params["I_s"]
         self._Vt = diode_params["V_t"]
         self._v_off = diode_params["V_off"]
-        b_clip_env = os.environ.get("DRN_B_CLAMP")
-        self._b_clip = float(b_clip_env) if b_clip_env is not None else None
+        self._b_clip = float(b_clamp)
 
     def pre_activate(self):
-        b = self._b()
+        b = self._b().clamp(min=-self._b_clip, max=self._b_clip)
         a = self._a().expand_as(b)
 
         if isinstance(self._layer, NonlinearResistiveLayer):
@@ -543,13 +601,20 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
     an exponential function of its voltage.
     """
 
-    def __init__(self, layer, fn, diode_params):
+    def __init__(
+        self,
+        layer,
+        fn,
+        diode_params,
+        settings: MinimizerSettings,
+    ):
         super().__init__(layer, fn)
         self._Is = diode_params["I_s"]
         self._Vt = diode_params["V_t"]
         self._v_off = diode_params["V_off"]
-        b_clip_env = os.environ.get("DRN_B_CLAMP")
-        self._b_clip = float(b_clip_env) if b_clip_env is not None else None
+        self._settings = settings
+        self._b_clip = settings.b_clamp
+        self._lambertw = _load_lambertw_backend(settings.lambertw_backend)
 
     def pre_activate(self):
         b = self._b()
@@ -563,7 +628,7 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
 
 
         # asymptotic expansion for large z
-    def lambertw_large(self, z, terms=4):
+    def lambertw_large(self, z, terms):
             L1 = torch.log(z)
             L2 = torch.log(L1)
             w = L1 - L2
@@ -617,14 +682,17 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
         if small_mask.any():
             z_small = torch.clamp(z[small_mask].to(torch.float64), max=float(z_thresh))
 
-            W0_small = lambertw(z_small).real.to(W0.dtype)                # float64
+            W0_small = self._lambertw(z_small).real.to(W0.dtype)          # float64
 
             W0[small_mask] = W0_small                                       # dtype match
 
         # --- asymptotic path (large z) ---
         if use_asym.any():
             z_large  = torch.clamp(z[use_asym].to(torch.float64), min=1.0)  # avoid log(log(z<1))
-            W0_large = self.lambertw_large(z_large).to(torch.float64)
+            W0_large = self.lambertw_large(
+                z_large,
+                terms=self._settings.lambertw_asymptotic_terms,
+            ).to(torch.float64)
             W0[use_asym] = W0_large
 
     # back-substitute (vt64, A are already float64)
@@ -683,11 +751,14 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
     You can apply a boolean mask to choose orientation per element.
     """
 
-    def __init__(self, layer, fn, diode_params):
+    def __init__(self, layer, fn, diode_params, settings: MinimizerSettings):
         super().__init__(layer, fn)
         self._Is   = diode_params["I_s"]
         self._Vt   = diode_params["V_t"]
         self._v_off = diode_params.get("V_off")
+        self._settings = settings
+        self._b_clip = settings.b_clamp
+        self._lambertw = _load_lambertw_backend(settings.lambertw_backend)
 
         # Optional: per-element orientation selection
         # True  -> reversed diode
@@ -738,8 +809,21 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         reverse_mask_nodes = torch.arange(M, device=b.device) >= (M // 2)  # [M]
         reverse_mask = reverse_mask_nodes.unsqueeze(0).expand_as(b)         # [N, M]
 
-        v_fwd = self.lambert_single_forward(a, b, self._Is, self._v_off, self._Vt)  # [N, M]
-        v_rev = self.lambert_single_reverse(a, b, self._Is, self._v_off, self._Vt)  # [N, M]
+        solver_settings = {
+            "z_thresh": self._settings.z_thresh,
+            "polish": self._settings.use_polish,
+            "abs_tol": self._settings.single_diode_polish_abs_tol,
+            "rel_tol": self._settings.single_diode_polish_rel_tol,
+            "exp_clip": self._settings.exp_clip,
+            "a_min": self._settings.single_diode_min_a,
+            "max_inner_iter": self._settings.max_newton_iters,
+        }
+        v_fwd = self.lambert_single_forward(
+            a, b, self._Is, self._v_off, self._Vt, **solver_settings
+        )
+        v_rev = self.lambert_single_reverse(
+            a, b, self._Is, self._v_off, self._Vt, **solver_settings
+        )
         self._debug_tensor("v_fwd", v_fwd)
         self._debug_tensor("v_rev", v_rev)
 
@@ -748,7 +832,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
 
     # ---------- Lambert-W helpers ----------
 
-    def lambertw_large(self, z, terms=4):
+    def lambertw_large(self, z, terms):
         L1 = torch.log(z)
         L2 = torch.log(L1)
         w = L1 - L2
@@ -761,9 +845,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         return w
 
     def _lambertw0(self, z):
-        if hasattr(torch, "special") and hasattr(torch.special, "lambertw"):
-            return torch.special.lambertw(z).real
-        return lambertw(z).real  # assumes you have lambertw imported elsewhere
+        return self._lambertw(z).real
 
     # ---------- Forward diode ----------
     # 2 a v + b + I_s (exp((v - v_off)/vT) - 1) = 0
@@ -777,7 +859,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         device = a.device
 
         a64 = torch.clamp(a.to(torch.float64), min=a_min)
-        b64 = b.to(torch.float64)
+        b64 = b.to(torch.float64).clamp(min=-self._b_clip, max=self._b_clip)
 
         Is64  = torch.as_tensor(I_s, dtype=torch.float64, device=device)
         vT64  = torch.as_tensor(vT,  dtype=torch.float64, device=device)
@@ -805,7 +887,10 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
 
         if use_asym.any():
             z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(z_large).to(torch.float64)
+            W0[use_asym] = self.lambertw_large(
+                z_large,
+                terms=self._settings.lambertw_asymptotic_terms,
+            ).to(torch.float64)
         self._debug_tensor("W0_fwd", W0)
 
         # v* = -Ashift - vT * W0
@@ -830,7 +915,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
 
                 max_abs_f = torch.max(torch.abs(f))
                 scale = torch.max(2.0*torch.abs(a64)*torch.abs(x) + torch.abs(b64) + torch.abs(Is64) + 1.0)
-                if (max_abs_f < abs_tol) and (max_abs_f/(scale + 1e-30) < rel_tol):
+                if (max_abs_f < abs_tol) and (max_abs_f/(scale + a_min) < rel_tol):
                     break
 
         return x.to(out_dtype)
@@ -848,7 +933,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         device = a.device
 
         a64 = torch.clamp(a.to(torch.float64), min=a_min)
-        b64 = b.to(torch.float64)
+        b64 = b.to(torch.float64).clamp(min=-self._b_clip, max=self._b_clip)
 
         Is64  = torch.as_tensor(I_s, dtype=torch.float64, device=device)
         vT64  = torch.as_tensor(vT,  dtype=torch.float64, device=device)
@@ -876,7 +961,10 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
 
         if use_asym.any():
             z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(z_large).to(torch.float64)
+            W0[use_asym] = self.lambertw_large(
+                z_large,
+                terms=self._settings.lambertw_asymptotic_terms,
+            ).to(torch.float64)
         self._debug_tensor("W0_rev", W0)
 
         # v* = -Ashift + vT * W0
@@ -903,7 +991,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
 
                 max_abs_f = torch.max(torch.abs(f))
                 scale = torch.max(2.0*torch.abs(a64)*torch.abs(x) + torch.abs(b64) + torch.abs(Is64) + 1.0)
-                if (max_abs_f < abs_tol) and (max_abs_f/(scale + 1e-30) < rel_tol):
+                if (max_abs_f < abs_tol) and (max_abs_f/(scale + a_min) < rel_tol):
                     break
 
         return x.to(out_dtype)
@@ -991,6 +1079,27 @@ class _EquilibriumMinimizer(Minimizer):
             type(updater) is ExponentialSingleDiodeUpdater for updater in updaters
         )
         self._settings = settings
+        self._iterations_performed = 0
+        self._final_max_voltage_change = math.inf
+        self._final_reference_scale = math.inf
+
+    @property
+    def iterations_performed(self):
+        """Number of complete sweeps performed by the latest equilibrium call."""
+
+        return self._iterations_performed
+
+    @property
+    def final_max_voltage_change(self):
+        """Largest state change in the final adaptive/fixed sweep."""
+
+        return self._final_max_voltage_change
+
+    @property
+    def final_reference_scale(self):
+        """Largest pre-sweep voltage magnitude for the latest sweep."""
+
+        return self._final_reference_scale
 
     @staticmethod
     def _max_abs_delta(new_state, old_state):
@@ -1016,18 +1125,67 @@ class _EquilibriumMinimizer(Minimizer):
         """Compute equilibrium using fixed sweeps or adaptive stopping."""
 
         if self._mode != "asynchronous":
-            return Minimizer.compute_equilibrium(self)
+            previous = [updater._layer.state.detach().clone() for updater in self._updaters]
+            result = Minimizer.compute_equilibrium(self)
+            self._iterations_performed = self._num_iterations
+            self._final_max_voltage_change = max(
+                (
+                    self._max_abs_delta(updater._layer.state, old_state)
+                    for updater, old_state in zip(self._updaters, previous)
+                ),
+                default=0.0,
+            )
+            self._final_reference_scale = max(
+                (float(state.abs().max().item()) for state in previous),
+                default=0.0,
+            )
+            return result
 
         max_num_of_iterations = len(self._list_layers) // 2
         use_adaptive = self._adaptive_equilibrium and not self._force_fixed_iterations
+        self._iterations_performed = 0
+        self._final_max_voltage_change = math.inf
+        self._final_reference_scale = math.inf
         if not use_adaptive:
             if len(self._list_layers) >= 2:
                 layer_group_odd, layer_group_even = self._list_layers[0], self._list_layers[1]
                 for _ in range(max_num_of_iterations):
+                    old_states = [
+                        updater._layer.state.detach().clone()
+                        for updater in (*layer_group_odd, *layer_group_even)
+                    ]
                     self._step_odd_even(layer_group_odd, layer_group_even)
+                    updaters = (*layer_group_odd, *layer_group_even)
+                    self._final_max_voltage_change = max(
+                        (
+                            self._max_abs_delta(updater._layer.state, old_state)
+                            for updater, old_state in zip(updaters, old_states)
+                        ),
+                        default=0.0,
+                    )
+                    self._final_reference_scale = max(
+                        (float(state.abs().max().item()) for state in old_states),
+                        default=0.0,
+                    )
+                    self._iterations_performed += 1
             else:
                 for layer_group in self._list_layers:
+                    old_states = [
+                        updater._layer.state.detach().clone() for updater in layer_group
+                    ]
                     self._step_group(layer_group)
+                    self._final_max_voltage_change = max(
+                        (
+                            self._max_abs_delta(updater._layer.state, old_state)
+                            for updater, old_state in zip(layer_group, old_states)
+                        ),
+                        default=0.0,
+                    )
+                    self._final_reference_scale = max(
+                        (float(state.abs().max().item()) for state in old_states),
+                        default=0.0,
+                    )
+                    self._iterations_performed += 1
         else:
             rtol = self._settings.rel_tol
             vntol = self._settings.vn_tol
@@ -1046,6 +1204,9 @@ class _EquilibriumMinimizer(Minimizer):
                     inf_delta = max(inf_delta, self._max_abs_delta(updater._layer.state, old_state))
                     inf_ref = max(inf_ref, float(old_state.abs().max().item()))
 
+                self._iterations_performed += 1
+                self._final_max_voltage_change = inf_delta
+                self._final_reference_scale = inf_ref
                 if inf_delta <= rtol * inf_ref + vntol:
                     break
 
@@ -1056,9 +1217,7 @@ class Float64ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
     """Float64 exponential double-diode coordinate updater."""
 
     def __init__(self, layer, fn, diode_params, settings: MinimizerSettings):
-        super().__init__(layer, fn, diode_params)
-        self._settings = settings
-        self._b_clip = _resolve_b_clip_from_env()
+        super().__init__(layer, fn, diode_params, settings)
 
     def pre_activate(self):
         b = self._b()
@@ -1077,7 +1236,7 @@ class Float64ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
             )
         return -b / (2.0 * a)
 
-    def lambertw_large(self, z, terms=4):
+    def lambertw_large(self, z, terms):
         L1 = torch.log(z)
         L2 = torch.log(L1)
         w = L1 - L2
@@ -1112,23 +1271,29 @@ class Float64ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
         z_add = (I_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg_add)
         z_rev = (I_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg_rev)
         z = torch.where(b64 > 0, z_rev, z_add)
+        _require_finite_tensor(z, context="Float64ExponentialDoubleDiodeUpdater Lambert-W argument")
 
         use_asym = z > z_thresh
         small_mask = ~use_asym
         W0 = torch.empty_like(z, dtype=torch.float64, device=z.device)
         if small_mask.any():
             z_small = torch.clamp(z[small_mask].to(torch.float64), max=float(z_thresh))
-            W0[small_mask] = lambertw(z_small).real.to(W0.dtype)
+            W0[small_mask] = self._lambertw(z_small).real.to(W0.dtype)
         if use_asym.any():
             z_large = torch.clamp(z[use_asym].to(torch.float64), min=1.0)
-            W0[use_asym] = self.lambertw_large(z_large).to(torch.float64)
+            W0[use_asym] = self.lambertw_large(
+                z_large,
+                terms=self._settings.lambertw_asymptotic_terms,
+            ).to(torch.float64)
+        _require_finite_tensor(W0, context="Float64ExponentialDoubleDiodeUpdater Lambert-W value")
 
         x = torch.where(b64 > 0, vt64 * W0 - A, -vt64 * W0 - A)
+        _require_finite_tensor(x, context="Float64ExponentialDoubleDiodeUpdater initial voltage")
         if polish:
-            current_tol = 1e-6 * x.shape[0]
+            current_tol = self._settings.double_diode_polish_residual_tol * x.shape[0]
             f = torch.zeros_like(x)
             df = torch.zeros_like(x)
-            for _ in range(1, max_inner_iter):
+            for _ in range(max_inner_iter):
                 mask_pos = b64 <= 0
                 mask_neg = ~mask_pos
                 if mask_pos.any():
@@ -1148,8 +1313,11 @@ class Float64ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
                     f[mask_neg] = 2 * an64 * xn + (bn64 + I_s) - I_s * en
                     df[mask_neg] = 2 * an64 + (I_s / vt) * en
                 if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    break
+                    raise NonFiniteDiodeError(
+                        "Float64ExponentialDoubleDiodeUpdater: non-finite Newton residual or derivative."
+                    )
                 x = x - f / df
+                _require_finite_tensor(x, context="Float64ExponentialDoubleDiodeUpdater polished voltage")
                 if torch.norm(f) < current_tol:
                     break
         return x.to(out_dtype)
@@ -1165,11 +1333,9 @@ class Float32ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
         diode_params,
         settings: MinimizerSettings,
         *,
-        overrelaxation_factor: float = 1.0,
+        overrelaxation_factor: float,
     ):
-        super().__init__(layer, fn, diode_params)
-        self._settings = settings
-        self._b_clip = _resolve_b_clip_from_env()
+        super().__init__(layer, fn, diode_params, settings)
         self._overrelaxation_factor = float(overrelaxation_factor)
 
     def pre_activate(self):
@@ -1194,7 +1360,7 @@ class Float32ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
             return v
         return self._layer.state + omega * (v - self._layer.state)
 
-    def lambertw_large(self, z, terms=4):
+    def lambertw_large(self, z, terms):
         L1 = torch.log(z)
         L2 = torch.log(L1)
         w = L1 - L2
@@ -1228,23 +1394,29 @@ class Float32ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
         z_add = (I_s_work / (2.0 * a_work * vt_work)) * torch.exp(exp_arg_add)
         z_rev = (I_s_work / (2.0 * a_work * vt_work)) * torch.exp(exp_arg_rev)
         z = torch.where(b_work > 0, z_rev, z_add)
+        _require_finite_tensor(z, context="Float32ExponentialDoubleDiodeUpdater Lambert-W argument")
 
         use_asym = z > z_thresh
         small_mask = ~use_asym
         W0 = torch.empty_like(z, dtype=work_dtype, device=device)
         if small_mask.any():
             z_small = torch.clamp(z[small_mask], max=float(z_thresh)).to(torch.float64)
-            W0[small_mask] = lambertw(z_small).real.to(work_dtype)
+            W0[small_mask] = self._lambertw(z_small).real.to(work_dtype)
         if use_asym.any():
             z_large = torch.clamp(z[use_asym], min=1.0).to(torch.float64)
-            W0[use_asym] = self.lambertw_large(z_large).to(work_dtype)
+            W0[use_asym] = self.lambertw_large(
+                z_large,
+                terms=self._settings.lambertw_asymptotic_terms,
+            ).to(work_dtype)
+        _require_finite_tensor(W0, context="Float32ExponentialDoubleDiodeUpdater Lambert-W value")
 
         x = torch.where(b_work > 0, vt_work * W0 - A, -vt_work * W0 - A)
+        _require_finite_tensor(x, context="Float32ExponentialDoubleDiodeUpdater initial voltage")
         if polish:
-            current_tol = 1e-6 * x.shape[0]
+            current_tol = self._settings.double_diode_polish_residual_tol * x.shape[0]
             f = torch.zeros_like(x)
             df = torch.zeros_like(x)
-            for _ in range(1, max_inner_iter):
+            for _ in range(max_inner_iter):
                 mask_pos = b_work <= 0
                 mask_neg = ~mask_pos
                 if mask_pos.any():
@@ -1264,8 +1436,11 @@ class Float32ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
                     f[mask_neg] = 2 * an_work * xn + (bn_work + I_s_work) - I_s_work * en
                     df[mask_neg] = 2 * an_work + (I_s_work / vt_work) * en
                 if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    break
+                    raise NonFiniteDiodeError(
+                        "Float32ExponentialDoubleDiodeUpdater: non-finite Newton residual or derivative."
+                    )
                 x = x - f / df
+                _require_finite_tensor(x, context="Float32ExponentialDoubleDiodeUpdater polished voltage")
                 if torch.norm(f) < current_tol:
                     break
         return x.to(out_dtype)
@@ -1281,7 +1456,7 @@ class OverRelaxedFloat64DoubleDiodeUpdater(Float64ExponentialDoubleDiodeUpdater)
         diode_params,
         settings: MinimizerSettings,
         *,
-        overrelaxation_factor: float = 1.3,
+        overrelaxation_factor: float,
     ):
         super().__init__(layer, fn, diode_params, settings)
         self._overrelaxation_factor = float(overrelaxation_factor)
@@ -1299,9 +1474,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
     """Single-diode updater with explicit forward/reverse orientation split."""
 
     def __init__(self, layer, fn, diode_params, settings: MinimizerSettings):
-        super().__init__(layer, fn, diode_params)
-        self._settings = settings
-        self._b_clip = _resolve_b_clip_from_env()
+        super().__init__(layer, fn, diode_params, settings)
 
     def pre_activate(self):
         b = self._b()
@@ -1320,10 +1493,10 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
             self._Vt,
             z_thresh=self._settings.z_thresh,
             polish=self._settings.use_polish,
-            abs_tol=1e-6,
-            rel_tol=1e-6,
+            abs_tol=self._settings.single_diode_polish_abs_tol,
+            rel_tol=self._settings.single_diode_polish_rel_tol,
             exp_clip=self._settings.exp_clip,
-            a_min=1e-30,
+            a_min=self._settings.single_diode_min_a,
             max_inner_iter=self._settings.max_newton_iters,
         )
         v_rev = self.lambert_single_reverse(
@@ -1334,15 +1507,15 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
             self._Vt,
             z_thresh=self._settings.z_thresh,
             polish=self._settings.use_polish,
-            abs_tol=1e-6,
-            rel_tol=1e-6,
+            abs_tol=self._settings.single_diode_polish_abs_tol,
+            rel_tol=self._settings.single_diode_polish_rel_tol,
             exp_clip=self._settings.exp_clip,
-            a_min=1e-30,
+            a_min=self._settings.single_diode_min_a,
             max_inner_iter=self._settings.max_newton_iters,
         )
         return torch.where(reverse_mask, v_rev, v_fwd)
 
-    def lambertw_large(self, z, terms=4):
+    def lambertw_large(self, z, terms):
         L1 = torch.log(z)
         L2 = torch.log(L1)
         w = L1 - L2
@@ -1355,9 +1528,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
         return w
 
     def _lambertw0(self, z):
-        if hasattr(torch, "special") and hasattr(torch.special, "lambertw"):
-            return torch.special.lambertw(z).real
-        return lambertw(z).real
+        return self._lambertw(z).real
 
     def lambert_single_forward(
         self,
@@ -1380,8 +1551,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
 
         a64 = torch.clamp(a.to(torch.float64), min=a_min)
         b64 = b.to(torch.float64)
-        if self._b_clip is not None:
-            b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
+        b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
         i_s64 = torch.as_tensor(I_s, dtype=torch.float64, device=device)
         vt64 = torch.as_tensor(vT, dtype=torch.float64, device=device)
         v_on64 = torch.as_tensor(v_on, dtype=torch.float64, device=device)
@@ -1401,7 +1571,10 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
             W0[~use_asym] = self._lambertw0(z_small).to(torch.float64)
         if use_asym.any():
             z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(z_large).to(torch.float64)
+            W0[use_asym] = self.lambertw_large(
+                z_large,
+                terms=self._settings.lambertw_asymptotic_terms,
+            ).to(torch.float64)
 
         x = -a_shift - vt64 * W0
         if polish:
@@ -1425,7 +1598,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
                     + torch.abs(i_s64)
                     + 1.0
                 )
-                if (max_abs_f < abs_tol) and (max_abs_f / (scale + 1e-30) < rel_tol):
+                if (max_abs_f < abs_tol) and (max_abs_f / (scale + a_min) < rel_tol):
                     break
         return x.to(out_dtype)
 
@@ -1450,8 +1623,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
 
         a64 = torch.clamp(a.to(torch.float64), min=a_min)
         b64 = b.to(torch.float64)
-        if self._b_clip is not None:
-            b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
+        b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
         i_s64 = torch.as_tensor(I_s, dtype=torch.float64, device=device)
         vt64 = torch.as_tensor(vT, dtype=torch.float64, device=device)
         v_on64 = torch.as_tensor(v_on, dtype=torch.float64, device=device)
@@ -1471,7 +1643,10 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
             W0[~use_asym] = self._lambertw0(z_small).to(torch.float64)
         if use_asym.any():
             z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(z_large).to(torch.float64)
+            W0[use_asym] = self.lambertw_large(
+                z_large,
+                terms=self._settings.lambertw_asymptotic_terms,
+            ).to(torch.float64)
 
         x = -a_shift + vt64 * W0
         if polish:
@@ -1495,7 +1670,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
                     + torch.abs(i_s64)
                     + 1.0
                 )
-                if (max_abs_f < abs_tol) and (max_abs_f / (scale + 1e-30) < rel_tol):
+                if (max_abs_f < abs_tol) and (max_abs_f / (scale + a_min) < rel_tol):
                     break
         return x.to(out_dtype)
 
@@ -1510,7 +1685,7 @@ class OverRelaxedSingleDiodeUpdater(ConfigurableExponentialSingleDiodeUpdater):
         diode_params,
         settings: MinimizerSettings,
         *,
-        overrelaxation_factor: float = 1.3,
+        overrelaxation_factor: float,
     ):
         super().__init__(layer, fn, diode_params, settings)
         self._overrelaxation_factor = float(overrelaxation_factor)
@@ -1533,10 +1708,11 @@ class ExperimentalIVCurveUpdater(LayerUpdater):
         fn,
         iv_data,
         *,
-        damping: float = 0.5,
-        max_newton_steps: int = 100,
-        newton_tol: float = 1e-5,
-        clamp: bool = True,
+        damping: float,
+        max_newton_steps: int,
+        newton_tol: float,
+        extrapolation: str,
+        nonconvergence_policy: str,
     ):
         super().__init__(layer, fn)
         self._iv_data = iv_data
@@ -1558,11 +1734,17 @@ class ExperimentalIVCurveUpdater(LayerUpdater):
                 "Expected experimental_newton_tol to be finite and positive. "
                 f"Provided value: {self._newton_tol!r}."
             )
-        extrapolation = os.environ.get("LABS_IV_EXTRAPOLATION", "clamp").strip().lower()
-        if extrapolation not in {"clamp", "linear"}:
-            extrapolation = "clamp"
-        self._clamp = bool(clamp) and extrapolation != "linear"
-        self._extrapolation = extrapolation
+        self._extrapolation = _require_choice(
+            extrapolation,
+            ("clamp", "linear"),
+            field="pwl_extrapolation",
+        )
+        self._clamp = self._extrapolation == "clamp"
+        self._nonconvergence_policy = _require_choice(
+            nonconvergence_policy,
+            ("accept_last", "error"),
+            field="pwl_nonconvergence_policy",
+        )
         self._a = fn.a_coef_fn(layer)
         self._b = fn.b_coef_fn(layer)
 
@@ -1590,14 +1772,21 @@ class ExperimentalIVCurveUpdater(LayerUpdater):
             return v_new
 
         v_old = -b / (2 * a)
+        _require_finite_tensor(v_old, context="ExperimentalIVCurveUpdater initial voltage")
         active = torch.ones_like(v_old, dtype=torch.bool)
         for _ in range(self._max_newton_steps):
             v = newton_step(v_old)
+            _require_finite_tensor(v, context="ExperimentalIVCurveUpdater Newton voltage")
             converged = torch.abs(v - v_old) < self._newton_tol
             active = active & ~converged
             v_old = v
             if not active.any().item():
                 break
+        if active.any().item() and self._nonconvergence_policy == "error":
+            raise RuntimeError(
+                "ExperimentalIVCurveUpdater exhausted max_steps before every "
+                f"coordinate reached voltage_tolerance; remaining={int(active.sum().item())}."
+            )
         return v_old
 
 
@@ -1610,11 +1799,12 @@ class OverRelaxedExperimentalIVCurveUpdater(ExperimentalIVCurveUpdater):
         fn,
         iv_data,
         *,
-        overrelaxation_factor: float = 1.3,
-        damping: float = 0.5,
-        max_newton_steps: int = 100,
-        newton_tol: float = 1e-5,
-        clamp: bool = True,
+        overrelaxation_factor: float,
+        damping: float,
+        max_newton_steps: int,
+        newton_tol: float,
+        extrapolation: str,
+        nonconvergence_policy: str,
     ):
         super().__init__(
             layer,
@@ -1623,7 +1813,8 @@ class OverRelaxedExperimentalIVCurveUpdater(ExperimentalIVCurveUpdater):
             damping=damping,
             max_newton_steps=max_newton_steps,
             newton_tol=newton_tol,
-            clamp=clamp,
+            extrapolation=extrapolation,
+            nonconvergence_policy=nonconvergence_policy,
         )
         self._overrelaxation_factor = float(overrelaxation_factor)
         v_vals = self._iv_data[1]
@@ -1668,27 +1859,32 @@ class QuadraticMinimizer(_EquilibriumMinimizer):
         non_linearity,
         quadratic_diode_param,
         exponential_diode_param,
+        hard_sigmoid_param,
         voltage_amp,
         current_amp,
-        hard_sigmoid_param=None,
         *,
-        iv_data=None,
-        double_diode_updater=None,
-        adaptive_equilibrium=False,
-        overrelaxation_factor=1.0,
-        single_diode_updater=None,
-        minimizer_settings=None,
-        damping=0.5,
-        experimental_newton_max_steps=100,
+        minimizer_settings: MinimizerSettings,
+        iv_data,
+        double_diode_updater,
+        adaptive_equilibrium,
+        overrelaxation_factor,
+        single_diode_updater,
+        damping,
+        experimental_newton_max_steps,
     ):
         quadratic_params = dict(quadratic_diode_param)
         exponential_params = dict(exponential_diode_param)
-        hard_sigmoid_params = dict(hard_sigmoid_param or {})
-        settings = minimizer_settings or DEFAULT_MINIMIZER_SETTINGS
-        if not isinstance(settings, MinimizerSettings):
+        hard_sigmoid_params = dict(hard_sigmoid_param)
+        if not isinstance(minimizer_settings, MinimizerSettings):
             raise TypeError(
-                "Expected minimizer_settings to be MinimizerSettings or None. "
-                f"Provided value: {settings!r}."
+                "Expected an explicit minimizer_settings MinimizerSettings object. "
+                f"Provided value: {minimizer_settings!r}."
+            )
+        settings = minimizer_settings
+        if not isinstance(adaptive_equilibrium, bool):
+            raise ValueError(
+                "Expected adaptive_equilibrium to be a boolean. "
+                f"Provided value: {adaptive_equilibrium!r}."
             )
         overrelaxation_factor = float(overrelaxation_factor)
         if not math.isfinite(overrelaxation_factor) or overrelaxation_factor <= 0.0:
@@ -1697,111 +1893,188 @@ class QuadraticMinimizer(_EquilibriumMinimizer):
                 f"Provided value: {overrelaxation_factor!r}."
             )
 
-        compact_nonlinearity = (
-            str(non_linearity).strip().lower().replace("-", "_").replace(" ", "_")
-        ).replace("_", "")
-        non_linearity = NONLINEARITY_ALIASES.get(compact_nonlinearity, non_linearity)
+        non_linearity = _require_choice(
+            non_linearity,
+            (
+                "perfect_diode",
+                "lpw_diode",
+                "double_diode_quadratic",
+                "double_diode_exponential",
+                "single_diode_exponential",
+                "experimental",
+                "hard_sigmoid",
+                "linear",
+            ),
+            field="non_linearity",
+        )
+
+        if adaptive_equilibrium:
+            _require_settings(
+                settings,
+                ("rel_tol", "vn_tol"),
+                context="adaptive-equilibrium",
+            )
+        if non_linearity == "lpw_diode":
+            _require_settings(settings, ("b_clamp",), context="LPW-diode")
+        elif non_linearity in {
+            "double_diode_exponential",
+            "single_diode_exponential",
+        }:
+            _require_settings(
+                settings,
+                (
+                    "use_polish",
+                    "z_thresh",
+                    "exp_clip",
+                    "b_clamp",
+                    "lambertw_backend",
+                    "lambertw_asymptotic_terms",
+                ),
+                context="Shockley",
+            )
+            if settings.use_polish:
+                _require_settings(
+                    settings,
+                    ("max_newton_iters",),
+                    context="Shockley polish",
+                )
+            if non_linearity == "single_diode_exponential":
+                _require_settings(
+                    settings,
+                    ("single_diode_min_a",),
+                    context="single-Shockley",
+                )
+                if settings.use_polish:
+                    _require_settings(
+                        settings,
+                        (
+                            "single_diode_polish_abs_tol",
+                            "single_diode_polish_rel_tol",
+                        ),
+                        context="single-Shockley polish",
+                    )
+            elif settings.use_polish:
+                _require_settings(
+                    settings,
+                    ("double_diode_polish_residual_tol",),
+                    context="double-Shockley polish",
+                )
+        elif non_linearity == "experimental":
+            _require_settings(
+                settings,
+                (
+                    "experimental_newton_tol",
+                    "pwl_extrapolation",
+                    "pwl_nonconvergence_policy",
+                ),
+                context="measured/PWL",
+            )
 
         if non_linearity == 'perfect_diode':
             updaters = [QuadraticUpdater(layer, fn) for layer in free_layers]
         elif non_linearity == 'lpw_diode':
-            updaters = [AdaptiveQuadraticUpdater(layer, fn, quadratic_params) for layer in free_layers]
+            updaters = [
+                AdaptiveQuadraticUpdater(
+                    layer,
+                    fn,
+                    quadratic_params,
+                    b_clamp=settings.b_clamp,
+                )
+                for layer in free_layers
+            ]
         elif non_linearity == 'double_diode_quadratic':
             updaters = [QuadraticDoubleDiodeUpdaterOffset(layer, fn, quadratic_params) for layer in free_layers]
         elif non_linearity == 'double_diode_exponential':
-            if double_diode_updater is None:
+            updater_name = _require_choice(
+                double_diode_updater,
+                (
+                    "float64",
+                    "float32",
+                    "float64_overrelaxed",
+                    "float32_overrelaxed",
+                ),
+                field="double_diode_updater",
+            )
+            if updater_name == "float64":
                 updaters = [
-                    ExponentialDoubleDiodeUpdater(layer, fn, exponential_params)
-                    for layer in free_layers
-                ]
-            else:
-                updater_name = _canonical_name(
-                    double_diode_updater,
-                    DOUBLE_DIODE_UPDATER_ALIASES,
-                    field="double_diode_updater",
-                )
-                if updater_name == "float64":
-                    updaters = [
-                        Float64ExponentialDoubleDiodeUpdater(
-                            layer, fn, exponential_params, settings
-                        )
-                        for layer in free_layers
-                    ]
-                elif updater_name in {"float32", "float32_overrelaxed"}:
-                    omega = (
-                        overrelaxation_factor
-                        if updater_name == "float32_overrelaxed"
-                        else 1.0
+                    Float64ExponentialDoubleDiodeUpdater(
+                        layer, fn, exponential_params, settings
                     )
-                    updaters = [
-                        Float32ExponentialDoubleDiodeUpdater(
-                            layer,
-                            fn,
-                            exponential_params,
-                            settings,
-                            overrelaxation_factor=omega,
-                        )
-                        for layer in free_layers
-                    ]
-                elif updater_name == "float64_overrelaxed":
-                    updaters = [
-                        OverRelaxedFloat64DoubleDiodeUpdater(
-                            layer,
-                            fn,
-                            exponential_params,
-                            settings,
-                            overrelaxation_factor=overrelaxation_factor,
-                        )
-                        for layer in free_layers
-                    ]
-                else:
-                    raise AssertionError(updater_name)
-        elif non_linearity == 'single_diode_exponential':
-            if single_diode_updater is None:
+                    for layer in free_layers
+                ]
+            elif updater_name in {"float32", "float32_overrelaxed"}:
+                omega = (
+                    overrelaxation_factor
+                    if updater_name == "float32_overrelaxed"
+                    else 1.0
+                )
                 updaters = [
-                    ExponentialSingleDiodeUpdater(layer, fn, exponential_params)
+                    Float32ExponentialDoubleDiodeUpdater(
+                        layer,
+                        fn,
+                        exponential_params,
+                        settings,
+                        overrelaxation_factor=omega,
+                    )
+                    for layer in free_layers
+                ]
+            elif updater_name == "float64_overrelaxed":
+                updaters = [
+                    OverRelaxedFloat64DoubleDiodeUpdater(
+                        layer,
+                        fn,
+                        exponential_params,
+                        settings,
+                        overrelaxation_factor=overrelaxation_factor,
+                    )
                     for layer in free_layers
                 ]
             else:
-                updater_name = _canonical_name(
-                    single_diode_updater,
-                    SINGLE_DIODE_UPDATER_ALIASES,
-                    field="single_diode_updater",
-                )
-                if updater_name == "custom":
-                    updaters = [
-                        ConfigurableExponentialSingleDiodeUpdater(
-                            layer, fn, exponential_params, settings
-                        )
-                        for layer in free_layers
-                    ]
-                elif updater_name == "standard":
-                    updaters = [
-                        ExponentialSingleDiodeUpdater(layer, fn, exponential_params)
-                        for layer in free_layers
-                    ]
-                elif updater_name == "overrelaxed":
-                    updaters = [
-                        OverRelaxedSingleDiodeUpdater(
-                            layer,
-                            fn,
-                            exponential_params,
-                            settings,
-                            overrelaxation_factor=overrelaxation_factor,
-                        )
-                        for layer in free_layers
-                    ]
-                else:
-                    raise AssertionError(updater_name)
+                raise AssertionError(updater_name)
+        elif non_linearity == 'single_diode_exponential':
+            updater_name = _require_choice(
+                single_diode_updater,
+                ("custom", "standard", "overrelaxed"),
+                field="single_diode_updater",
+            )
+            if updater_name == "custom":
+                updaters = [
+                    ConfigurableExponentialSingleDiodeUpdater(
+                        layer, fn, exponential_params, settings
+                    )
+                    for layer in free_layers
+                ]
+            elif updater_name == "standard":
+                updaters = [
+                    ExponentialSingleDiodeUpdater(
+                        layer, fn, exponential_params, settings
+                    )
+                    for layer in free_layers
+                ]
+            elif updater_name == "overrelaxed":
+                updaters = [
+                    OverRelaxedSingleDiodeUpdater(
+                        layer,
+                        fn,
+                        exponential_params,
+                        settings,
+                        overrelaxation_factor=overrelaxation_factor,
+                    )
+                    for layer in free_layers
+                ]
+            else:
+                raise AssertionError(updater_name)
         elif non_linearity == 'experimental':
             if iv_data is None:
                 raise ValueError(
                     "Expected iv_data to be a 2xN tensor for the measured/PWL "
                     "nonlinearity. Provided value: None."
                 )
-            updater_name = _canonical_name(
-                double_diode_updater or "standard",
-                EXPERIMENTAL_UPDATER_ALIASES,
+            # Kept on the legacy argument name only while callers migrate to the
+            # typed family-specific updater block.
+            updater_name = _require_choice(
+                double_diode_updater,
+                ("standard", "overrelaxed"),
                 field="double_diode_updater",
             )
             if updater_name == "overrelaxed":
@@ -1814,6 +2087,8 @@ class QuadraticMinimizer(_EquilibriumMinimizer):
                         damping=damping,
                         max_newton_steps=experimental_newton_max_steps,
                         newton_tol=settings.experimental_newton_tol,
+                        extrapolation=settings.pwl_extrapolation,
+                        nonconvergence_policy=settings.pwl_nonconvergence_policy,
                     )
                     for layer in free_layers
                 ]
@@ -1826,6 +2101,8 @@ class QuadraticMinimizer(_EquilibriumMinimizer):
                         damping=damping,
                         max_newton_steps=experimental_newton_max_steps,
                         newton_tol=settings.experimental_newton_tol,
+                        extrapolation=settings.pwl_extrapolation,
+                        nonconvergence_policy=settings.pwl_nonconvergence_policy,
                     )
                     for layer in free_layers
                 ]

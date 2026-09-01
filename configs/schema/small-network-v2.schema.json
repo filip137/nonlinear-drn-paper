@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/small-network-v2.schema.json",
+  "title": "Hand-specified nonlinear resistive network configuration, version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"const": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/small-network-v2.schema.json"},
+    "schema_version": {"const": 2},
+    "kind": {"const": "small_network"},
+    "description": {"type": "string", "minLength": 1},
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layer_sizes": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "conductances": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "number", "minimum": 0}
+            }
+          }
+        },
+        "input_voltages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "number"}
+          }
+        },
+        "input_gain": {"type": "number", "exclusiveMinimum": 0},
+        "input_encoding": {"const": "direct"},
+        "bias": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"method": {"const": "none"}},
+          "required": ["method"]
+        },
+        "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "state_dtype": {"enum": ["float32", "float64"]}
+      },
+      "required": [
+        "layer_sizes",
+        "conductances",
+        "input_voltages",
+        "input_gain",
+        "input_encoding",
+        "bias",
+        "seed",
+        "state_dtype"
+      ]
+    },
+    "simulation": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/simulation"
+    },
+    "equilibrium": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/equilibrium"
+    },
+    "execution": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/execution"
+    },
+    "provenance": {
+      "$ref": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json#/$defs/provenance"
+    }
+  },
+  "required": [
+    "$schema",
+    "schema_version",
+    "kind",
+    "description",
+    "network",
+    "simulation",
+    "equilibrium",
+    "execution",
+    "provenance"
+  ]
+}

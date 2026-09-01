@@ -1,142 +1,246 @@
+"""Canonical, strict runtime configuration models.
+
+The public loaders in this module never coerce values and never provide a
+scientific default. JSON Schema validation happens before a runtime object is
+constructed.
+"""
+
 from __future__ import annotations
 
-import json
+import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from repro.strict_config import load_validated_json, validate_document
+from repro.execution import validate_execution_relations
+
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    dims: list[int]
-    non_linearity: str
-    weight_gains: list[float]
-    weight_min: float
-    weight_max: float
-    input_gain: float
-    voltage_amp: float
-    current_amp: float
-    batch_size: int
-    num_iterations: int
-    seed: int | None
-    bias_scale_mode: str
-    bias_interaction_type: str
-    signed_weights: bool
-    quadratic_diode_param: dict[str, Any]
-    exponential_diode_param: dict[str, Any]
-    hard_sigmoid_param: dict[str, Any]
-    double_diode_updater: str | None
-    single_diode_updater: str | None
-    adaptive_equilibrium: bool
-    rel_tol: float
-    vn_tol: float
-    use_polish: bool
-    max_newton_iters: int
-    z_thresh: float
-    exp_clip: float
-    minimizer_impl: str
-    damping: float
-    overrelaxation_factor: float
-    experimental_newton_max_steps: int
-    experimental_newton_tol: float
-    iv_data_path: str | None
+    """A fully validated replay configuration."""
+
+    document: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        _validate_runtime_relations(self.document)
+
+    @property
+    def data(self) -> dict[str, Any]:
+        return self.document["data"]
+
+    @property
+    def model(self) -> dict[str, Any]:
+        return self.document["model"]
+
+    @property
+    def simulation(self) -> dict[str, Any]:
+        return self.document["simulation"]
+
+    @property
+    def equilibrium(self) -> dict[str, Any]:
+        return self.document["equilibrium"]
+
+    @property
+    def dims(self) -> list[int]:
+        return list(self.model["layer_widths"])
+
+    @property
+    def non_linearity(self) -> str:
+        return self.simulation["nonlinearity"]
+
+    @property
+    def weight_gains(self) -> list[float]:
+        return list(self.model["weight_gains"])
+
+    @property
+    def weight_min(self) -> float:
+        return self.model["weight_bounds"]["minimum"]
+
+    @property
+    def weight_max(self) -> float:
+        return self.model["weight_bounds"]["maximum"]
+
+    @property
+    def input_gain(self) -> float:
+        return self.model["input_gain"]
+
+    @property
+    def voltage_amp(self) -> float:
+        return self.simulation["amplification"]["voltage_factor"]
+
+    @property
+    def current_amp(self) -> float:
+        return self.simulation["amplification"]["current_factor"]
+
+    @property
+    def batch_size(self) -> int:
+        return self.data["loader"]["batch_size"]
+
+    @property
+    def num_iterations(self) -> int:
+        if self.equilibrium["method"] == "fixed_sweeps":
+            return self.equilibrium["sweeps"]
+        return self.equilibrium["max_sweeps"]
+
+    @property
+    def seed(self) -> int:
+        return self.data["seed"]
+
+    @property
+    def bias_scale_mode(self) -> str:
+        return self.model["bias"]["scale_mode"]
+
+    @property
+    def bias_interaction_type(self) -> str:
+        return self.model["bias"]["interaction"]
+
+    @property
+    def signed_weights(self) -> bool:
+        return self.model["signed_weights"]
+
+    @property
+    def exponential_diode_param(self) -> dict[str, float]:
+        if self.non_linearity not in {
+            "single_diode_exponential",
+            "double_diode_exponential",
+        }:
+            return {}
+        physical = self.simulation["physical"]
+        return {
+            "I_s": physical["saturation_current"],
+            "V_t": physical["thermal_voltage"],
+            "V_off": physical["offset_voltage"],
+        }
+
+    @property
+    def adaptive_equilibrium(self) -> bool:
+        return self.equilibrium["method"] == "voltage_change"
+
+    @property
+    def mode(self) -> str:
+        return self.equilibrium["update_order"]
 
 
-def load_runtime_config(path: Path, *, pack_root: Path, num_iterations: int | None = None) -> RuntimeConfig:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    non_linearity = _required_str(data, "non_linearity")
-    quadratic = _required_dict(data, "quadratic_diode_param")
-    exponential = _required_dict(data, "exponential_diode_param")
-    hard_sigmoid = _required_dict(data, "hard_sigmoid_param")
-    if non_linearity == "double_diode_exponential":
-        _require_keys(exponential, ("I_s", "V_t", "V_off"), "exponential_diode_param")
-    if non_linearity == "single_diode_exponential":
-        _require_keys(exponential, ("I_s", "V_t", "V_off"), "exponential_diode_param")
-    if non_linearity in ("hard_sigmoid", "double_diode"):
-        _require_keys(hard_sigmoid, ("g_on", "g_off", "v_min", "v_max"), "hard_sigmoid_param")
+def load_runtime_config(
+    path: Path,
+    *,
+    pack_root: Path,
+    equilibrium_override: Mapping[str, Any] | None = None,
+) -> RuntimeConfig:
+    """Load one v2 replay config and apply a schema-checked job sweep override."""
 
-    dims = data.get("dims")
-    if not isinstance(dims, list) or len(dims) < 2:
-        raise ValueError(f"Expected config 'dims' to be a list with at least two entries. Provided value: {dims!r}.")
-
-    iv_path = data.get("iv_data_path") or data.get("LABS_IV_CURVE_PATH")
-    if iv_path is not None:
-        candidate = Path(iv_path)
-        if not candidate.is_absolute():
-            candidate = pack_root / candidate
-        iv_path = str(candidate)
-
-    return RuntimeConfig(
-        dims=[int(item) for item in dims],
-        non_linearity=non_linearity,
-        weight_gains=[float(item) for item in _required_list(data, "weight_gains")],
-        weight_min=float(_required(data, "weight_min")),
-        weight_max=float(_required(data, "weight_max")),
-        input_gain=float(_required(data, "input_gain")),
-        voltage_amp=float(_required(data, "voltage_amp")),
-        current_amp=float(_required(data, "current_amp")),
-        batch_size=int(data.get("batch_size", 1)),
-        num_iterations=int(num_iterations if num_iterations is not None else _required(data, "num_iterations")),
-        seed=int(data["seed"]) if data.get("seed") is not None else None,
-        bias_scale_mode=str(data.get("bias_scale_mode", "legacy")),
-        bias_interaction_type=str(data.get("bias_interaction_type", "linear")),
-        signed_weights=bool(data.get("signed_weights", False)),
-        quadratic_diode_param=quadratic,
-        exponential_diode_param=exponential,
-        hard_sigmoid_param=hard_sigmoid,
-        double_diode_updater=data.get("double_diode_updater"),
-        single_diode_updater=data.get("single_diode_updater"),
-        adaptive_equilibrium=bool(_required(data, "adaptive_equilibrium")),
-        rel_tol=float(data.get("rel_tol", 1e-5)),
-        vn_tol=float(data.get("vn_tol", 1e-6)),
-        use_polish=bool(data.get("use_polish", True)),
-        max_newton_iters=int(data.get("max_newton_iters", 32)),
-        z_thresh=float(data.get("z_thresh", 1e10)),
-        exp_clip=float(_required(data, "exp_clip")) if non_linearity in ("single_diode_exponential", "double_diode_exponential") else float(data.get("exp_clip", 100000.0)),
-        minimizer_impl=str(_required(data, "minimizer_impl")),
-        damping=float(data.get("damping", 0.5)),
-        overrelaxation_factor=float(data.get("overrelaxation_factor", 1.1)),
-        experimental_newton_max_steps=int(data.get("experimental_newton_max_steps", 100)),
-        experimental_newton_tol=float(data.get("experimental_newton_tol", 1e-5)),
-        iv_data_path=iv_path,
+    document = load_validated_json(
+        path,
+        "replay-v2.schema.json",
+        repo_root=pack_root,
     )
+    if equilibrium_override is not None:
+        document = _apply_equilibrium_override(document, equilibrium_override)
+        validate_document(document, "replay-v2.schema.json", repo_root=pack_root)
+    config = RuntimeConfig(document=document)
+    from repro.minimizer_factory import simulation_assets
+
+    simulation_assets(config.simulation, repo_root=pack_root)
+    return config
 
 
-def parse_layer_shapes(dims: list[int]) -> tuple[int, list[int], int, list[tuple[int, ...]]]:
+def _apply_equilibrium_override(
+    document: Mapping[str, Any], override: Mapping[str, Any]
+) -> dict[str, Any]:
+    if not isinstance(override, Mapping):
+        raise ValueError(
+            "Expected manifest overrides.equilibrium to be an object. "
+            f"Provided value: {override!r}."
+        )
+    equilibrium = document["equilibrium"]
+    method = equilibrium["method"]
+    expected_key = "sweeps" if method == "fixed_sweeps" else "max_sweeps"
+    if set(override) != {expected_key}:
+        raise ValueError(
+            "Expected the manifest equilibrium override to replace only the "
+            f"active {expected_key!r} field for method {method!r}. "
+            f"Provided keys: {sorted(override)}."
+        )
+    value = override[expected_key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            f"Expected manifest equilibrium override {expected_key!r} to be a "
+            f"positive integer. Provided value: {value!r}."
+        )
+    expanded = copy.deepcopy(dict(document))
+    expanded["equilibrium"][expected_key] = value
+    return expanded
+
+
+def parse_layer_shapes(
+    dims: list[int],
+) -> tuple[int, list[int], int, list[tuple[int, ...]]]:
     if dims[0] % 2 != 0:
-        raise ValueError(f"Expected input layer size to be divisible by 2. Provided value: {dims[0]!r}.")
-    shapes = [(int(dim),) for dim in dims]
-    return dims[0] // 2, [int(item) for item in dims[1:-1]], int(dims[-1]), shapes
+        raise ValueError(
+            "Expected input layer size to be divisible by 2. "
+            f"Provided value: {dims[0]!r}."
+        )
+    shapes = [(item,) for item in dims]
+    return dims[0] // 2, dims[1:-1], dims[-1], shapes
 
 
-def _required(data: dict[str, Any], name: str) -> Any:
-    if name not in data or data[name] is None:
-        raise ValueError(f"Expected config field '{name}' to be present. Provided value: {data.get(name)!r}.")
-    return data[name]
+def _validate_runtime_relations(document: Mapping[str, Any]) -> None:
+    model = document["model"]
+    simulation = document["simulation"]
+    widths = model["layer_widths"]
+    if len(model["weight_gains"]) != len(widths) - 1:
+        raise ValueError(
+            "Expected one model.weight_gains value per adjacent replay layer. "
+            f"Provided widths={widths!r}, gains={model['weight_gains']!r}."
+        )
+    bounds = model["weight_bounds"]
+    if bounds["minimum"] > bounds["maximum"]:
+        raise ValueError(
+            "Expected model.weight_bounds.minimum not to exceed maximum."
+        )
+    if widths[0] != 128:
+        raise ValueError(
+            "Expected sklearn Digits replay model.layer_widths[0] to be 128 "
+            "for the explicit signed-pair encoding. "
+            f"duplication. Provided value: {widths[0]!r}."
+        )
+    output = model["output"]
+    if output["classes"] != 10:
+        raise ValueError(
+            "Expected sklearn Digits replay model.output.classes to be 10. "
+            f"Provided value: {output['classes']!r}."
+        )
+    expected_output = (
+        output["classes"]
+        if output["encoding"] == "single_ended"
+        else 2 * output["classes"]
+    )
+    if widths[-1] != expected_output:
+        raise ValueError(
+            f"Expected replay output width {expected_output} for {output!r}; "
+            f"provided {widths[-1]}."
+        )
+    if simulation["nonlinearity"] == "single_diode_exponential" and any(
+        width % 2 for width in widths[1:-1]
+    ):
+        raise ValueError(
+            "Expected every single-Shockley replay hidden width to be even. "
+            f"Provided value: {widths[1:-1]!r}."
+        )
+    if document["equilibrium"]["initial_state"] != "zeros":
+        raise ValueError("Expected replay equilibrium.initial_state to be 'zeros'.")
+    execution = document.get("execution")
+    if execution is not None:
+        validate_execution_relations(execution)
+    if execution is not None and (
+        model["state_dtype"] != execution["backend"]["default_dtype"]
+    ):
+        raise ValueError(
+            "Expected replay model.state_dtype to match "
+            "execution.backend.default_dtype."
+        )
 
 
-def _required_str(data: dict[str, Any], name: str) -> str:
-    value = _required(data, name)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"Expected config field '{name}' to be a non-empty string. Provided value: {value!r}.")
-    return value
-
-
-def _required_dict(data: dict[str, Any], name: str) -> dict[str, Any]:
-    value = _required(data, name)
-    if not isinstance(value, dict):
-        raise ValueError(f"Expected config field '{name}' to be an object. Provided value: {value!r}.")
-    return dict(value)
-
-
-def _required_list(data: dict[str, Any], name: str) -> list[Any]:
-    value = _required(data, name)
-    if not isinstance(value, list):
-        raise ValueError(f"Expected config field '{name}' to be a list. Provided value: {value!r}.")
-    return list(value)
-
-
-def _require_keys(data: dict[str, Any], keys: tuple[str, ...], label: str) -> None:
-    missing = [key for key in keys if key not in data]
-    if missing:
-        raise ValueError(f"Expected config '{label}' to include keys {keys}. Provided value missing: {missing}.")
+__all__ = ["RuntimeConfig", "load_runtime_config", "parse_layer_shapes"]

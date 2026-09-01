@@ -1,23 +1,40 @@
 {
-  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/simulator/schema.json",
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/simulator-v2.schema.json",
   "description": "Default simulator profile for a sampled custom/measured PWL I-V curve.",
-  "non_linearity": "experimental",
-  "voltage_amp": 4.0,
-  "current_amp": 1.0,
-  "iv_data_path": "data/assets/experimental_curve_voff_0.8_200_points.npz",
-  "minimizer_impl": "custom",
-  "mode": "asynchronous",
-  "single_diode_updater": "custom",
-  "double_diode_updater": "overrelaxed",
-  "overrelaxation_factor": 1.0,
-  "adaptive_equilibrium": false,
-  "rel_tol": 1e-5,
-  "vn_tol": 1e-6,
-  "use_polish": false,
-  "max_newton_iters": 32,
-  "z_thresh": 1e10,
-  "exp_clip": 100.0,
-  "damping": 1.0,
-  "experimental_newton_max_steps": 32,
-  "experimental_newton_tol": 0.01
+  "kind": "simulator_profile",
+  "provenance": {
+    "materialized_defaults": [
+      "simulation.updater.extrapolation",
+      "simulation.updater.nonconvergence_policy"
+    ],
+    "migration": {
+      "from_schema_version": 1,
+      "to_schema_version": 2,
+      "tool": "scripts/migrate_training_configs.py"
+    }
+  },
+  "schema_version": 2,
+  "simulation": {
+    "amplification": {
+      "current_factor": 1.0,
+      "voltage_factor": 4.0
+    },
+    "nonlinearity": "experimental",
+    "physical": {
+      "representation": "measured_piecewise_linear"
+    },
+    "updater": {
+      "curve": {
+        "path": "data/assets/experimental_curve_voff_0.8_200_points.npz",
+        "sha256": "3d7dd78182fc399fecdf1f6a99a3b9b71ffde131fd32e1bd62bde2689be136ea"
+      },
+      "damping": 1.0,
+      "extrapolation": "clamp",
+      "max_steps": 32,
+      "method": "piecewise_linear_newton_v1",
+      "nonconvergence_policy": "accept_last",
+      "relaxation": 1.0,
+      "voltage_tolerance": 0.01
+    }
+  }
 }

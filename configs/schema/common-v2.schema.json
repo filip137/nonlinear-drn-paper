@@ -1,0 +1,596 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/common-v2.schema.json",
+  "title": "Nonlinear DRN reproducibility configuration definitions, version 2",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "configReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+        },
+        "sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "required": ["path", "sha256"]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "notes": {"type": "string", "minLength": 1},
+        "migration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {"type": "string", "minLength": 1},
+            "from_schema_version": {"type": "integer", "minimum": 1},
+            "to_schema_version": {"const": 2}
+          },
+          "required": ["tool", "from_schema_version", "to_schema_version"]
+        },
+        "materialized_defaults": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "historical_unused": {
+          "type": "object",
+          "description": "Archived values that are explicitly not read by scientific code.",
+          "additionalProperties": true
+        },
+        "config_sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "owner": {"type": "string", "minLength": 1},
+              "path": {"type": "string", "minLength": 1},
+              "sha256": {"$ref": "#/$defs/sha256"}
+            },
+            "required": ["owner", "path", "sha256"]
+          }
+        },
+        "generation_overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "pointer": {"type": "string", "pattern": "^(?:$|/)"},
+              "value": true
+            },
+            "required": ["pointer", "value"]
+          }
+        },
+        "expected_results": {
+          "type": "object",
+          "description": "Audited outcome metadata; never a scientific runtime input.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "shockleyPhysical": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "saturation_current": {"type": "number", "exclusiveMinimum": 0},
+        "thermal_voltage": {"type": "number", "exclusiveMinimum": 0},
+        "offset_voltage": {"type": "number"}
+      },
+      "required": ["saturation_current", "thermal_voltage", "offset_voltage"]
+    },
+    "piecewiseLinearPhysical": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "representation": {"const": "measured_piecewise_linear"}
+      },
+      "required": ["representation"]
+    },
+    "amplification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "voltage_factor": {"type": "number", "exclusiveMinimum": 0},
+        "current_factor": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "required": ["voltage_factor", "current_factor"]
+    },
+    "singleShockleyUpdater": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {"const": "lambert_w_v1"},
+        "backend": {"enum": ["torchlambertw"]},
+        "dtype": {"const": "float64"},
+        "relaxation": {"type": "number", "exclusiveMinimum": 0},
+        "linear_coefficient_clamp": {"type": "number", "exclusiveMinimum": 0},
+        "quadratic_coefficient_min": {"type": "number", "exclusiveMinimum": 0},
+        "exponent_clip": {"type": "number", "exclusiveMinimum": 0},
+        "asymptotic_threshold": {"type": "number", "exclusiveMinimum": 1},
+        "asymptotic_terms": {"const": 4},
+        "polish": {
+          "oneOf": [
+            {"const": false},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "method": {"const": "newton_v1"},
+                "max_steps": {"type": "integer", "minimum": 1},
+                "absolute_tolerance": {"type": "number", "exclusiveMinimum": 0},
+                "relative_tolerance": {"type": "number", "exclusiveMinimum": 0}
+              },
+              "required": ["method", "max_steps", "absolute_tolerance", "relative_tolerance"]
+            }
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "backend",
+        "dtype",
+        "relaxation",
+        "linear_coefficient_clamp",
+        "quadratic_coefficient_min",
+        "exponent_clip",
+        "asymptotic_threshold",
+        "asymptotic_terms",
+        "polish"
+      ]
+    },
+    "doubleShockleyUpdater": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {"const": "lambert_w_v1"},
+        "backend": {"enum": ["torchlambertw"]},
+        "dtype": {"enum": ["float32", "float64"]},
+        "relaxation": {"type": "number", "exclusiveMinimum": 0},
+        "linear_coefficient_clamp": {"type": "number", "exclusiveMinimum": 0},
+        "exponent_clip": {"type": "number", "exclusiveMinimum": 0},
+        "asymptotic_threshold": {"type": "number", "exclusiveMinimum": 1},
+        "asymptotic_terms": {"const": 4},
+        "polish": {
+          "oneOf": [
+            {"const": false},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "method": {"const": "newton_v1"},
+                "max_steps": {"type": "integer", "minimum": 1},
+                "residual_tolerance": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "rule": {"const": "batch_scaled_absolute"},
+                    "coefficient": {"type": "number", "exclusiveMinimum": 0}
+                  },
+                  "required": ["rule", "coefficient"]
+                }
+              },
+              "required": ["method", "max_steps", "residual_tolerance"]
+            }
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "backend",
+        "dtype",
+        "relaxation",
+        "linear_coefficient_clamp",
+        "exponent_clip",
+        "asymptotic_threshold",
+        "asymptotic_terms",
+        "polish"
+      ]
+    },
+    "piecewiseLinearUpdater": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {"const": "piecewise_linear_newton_v1"},
+        "curve": {"$ref": "#/$defs/configReference"},
+        "extrapolation": {"enum": ["clamp", "linear"]},
+        "nonconvergence_policy": {"enum": ["accept_last", "error"]},
+        "damping": {"type": "number", "exclusiveMinimum": 0},
+        "max_steps": {"type": "integer", "minimum": 1},
+        "voltage_tolerance": {"type": "number", "exclusiveMinimum": 0},
+        "relaxation": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "required": [
+        "method",
+        "curve",
+        "extrapolation",
+        "nonconvergence_policy",
+        "damping",
+        "max_steps",
+        "voltage_tolerance",
+        "relaxation"
+      ]
+    },
+    "singleShockleySimulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nonlinearity": {"const": "single_diode_exponential"},
+        "physical": {"$ref": "#/$defs/shockleyPhysical"},
+        "amplification": {"$ref": "#/$defs/amplification"},
+        "updater": {"$ref": "#/$defs/singleShockleyUpdater"}
+      },
+      "required": ["nonlinearity", "physical", "amplification", "updater"]
+    },
+    "doubleShockleySimulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nonlinearity": {"const": "double_diode_exponential"},
+        "physical": {"$ref": "#/$defs/shockleyPhysical"},
+        "amplification": {"$ref": "#/$defs/amplification"},
+        "updater": {"$ref": "#/$defs/doubleShockleyUpdater"}
+      },
+      "required": ["nonlinearity", "physical", "amplification", "updater"]
+    },
+    "piecewiseLinearSimulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nonlinearity": {"const": "experimental"},
+        "physical": {"$ref": "#/$defs/piecewiseLinearPhysical"},
+        "amplification": {"$ref": "#/$defs/amplification"},
+        "updater": {"$ref": "#/$defs/piecewiseLinearUpdater"}
+      },
+      "required": ["nonlinearity", "physical", "amplification", "updater"]
+    },
+    "simulation": {
+      "oneOf": [
+        {"$ref": "#/$defs/singleShockleySimulation"},
+        {"$ref": "#/$defs/doubleShockleySimulation"},
+        {"$ref": "#/$defs/piecewiseLinearSimulation"}
+      ]
+    },
+    "fixedEquilibrium": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {"const": "fixed_sweeps"},
+        "initial_state": {"const": "zeros"},
+        "update_order": {"enum": ["asynchronous", "synchronous", "forward", "backward"]},
+        "sweeps": {"type": "integer", "minimum": 1}
+      },
+      "required": ["method", "initial_state", "update_order", "sweeps"]
+    },
+    "voltageChangeEquilibrium": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {"const": "voltage_change"},
+        "initial_state": {"const": "zeros"},
+        "update_order": {"const": "asynchronous"},
+        "max_sweeps": {"type": "integer", "minimum": 1},
+        "relative_tolerance": {"type": "number", "exclusiveMinimum": 0},
+        "absolute_tolerance": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "required": [
+        "method",
+        "initial_state",
+        "update_order",
+        "max_sweeps",
+        "relative_tolerance",
+        "absolute_tolerance"
+      ]
+    },
+    "equilibrium": {
+      "oneOf": [
+        {"$ref": "#/$defs/fixedEquilibrium"},
+        {"$ref": "#/$defs/voltageChangeEquilibrium"}
+      ]
+    },
+    "threads": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "torch_intraop": {"type": "integer", "minimum": 1},
+        "torch_interop": {"type": "integer", "minimum": 1},
+        "omp": {"type": "integer", "minimum": 1},
+        "blas": {"type": "integer", "minimum": 1}
+      },
+      "required": ["torch_intraop", "torch_interop", "omp", "blas"]
+    },
+    "dataLoaderExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "num_workers": {"const": 0},
+        "persistent_workers": {"const": false},
+        "pin_memory": {"type": "boolean"},
+        "prefetch_factor": {"const": null},
+        "timeout_seconds": {"const": 0.0}
+      },
+      "required": [
+        "num_workers",
+        "persistent_workers",
+        "pin_memory",
+        "prefetch_factor",
+        "timeout_seconds"
+      ]
+    },
+    "determinism": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "torch_deterministic_algorithms": {"const": true},
+        "warn_only": {"const": false},
+        "float32_matmul_precision": {"enum": ["highest", "high", "medium"]}
+      },
+      "required": [
+        "torch_deterministic_algorithms",
+        "warn_only",
+        "float32_matmul_precision"
+      ]
+    },
+    "seeding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "python": {"const": "config_seed"},
+        "numpy": {"const": "config_seed"},
+        "torch": {"const": "config_seed"}
+      },
+      "required": ["python", "numpy", "torch"]
+    },
+    "cpuExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "backend": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "device": {"const": "cpu"},
+            "construction_device": {"const": "cpu"},
+            "default_dtype": {"enum": ["float32", "float64"]}
+          },
+          "required": ["device", "construction_device", "default_dtype"]
+        },
+        "determinism": {"$ref": "#/$defs/determinism"},
+        "threads": {"$ref": "#/$defs/threads"},
+        "dataloader": {"$ref": "#/$defs/dataLoaderExecution"},
+        "seeding": {"$ref": "#/$defs/seeding"}
+      },
+      "required": ["name", "backend", "determinism", "threads", "dataloader", "seeding"]
+    },
+    "cudaExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "backend": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "device": {"const": "cuda"},
+            "index": {"type": "integer", "minimum": 0},
+            "construction_device": {"const": "cpu"},
+            "default_dtype": {"enum": ["float32", "float64"]}
+          },
+          "required": ["device", "index", "construction_device", "default_dtype"]
+        },
+        "determinism": {"$ref": "#/$defs/determinism"},
+        "threads": {"$ref": "#/$defs/threads"},
+        "dataloader": {"$ref": "#/$defs/dataLoaderExecution"},
+        "seeding": {"$ref": "#/$defs/seeding"},
+        "cuda": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cudnn_deterministic": {"const": true},
+            "cudnn_benchmark": {"const": false},
+            "cudnn_allow_tf32": {"type": "boolean"},
+            "cublas_workspace_config": {"enum": [":4096:8", ":16:8"]}
+          },
+          "required": [
+            "cudnn_deterministic",
+            "cudnn_benchmark",
+            "cudnn_allow_tf32",
+            "cublas_workspace_config"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "backend",
+        "determinism",
+        "threads",
+        "dataloader",
+        "seeding",
+        "cuda"
+      ]
+    },
+    "execution": {
+      "oneOf": [
+        {"$ref": "#/$defs/cpuExecution"},
+        {"$ref": "#/$defs/cudaExecution"}
+      ]
+    },
+    "weightBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minimum": {"type": "number", "minimum": 0},
+        "maximum": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "required": ["minimum", "maximum"]
+    },
+    "bias": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"const": true},
+        "scale_mode": {"enum": ["legacy", "constant"]},
+        "interaction": {"enum": ["linear", "quadratic"]},
+        "initialization": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {"const": "constant"},
+            "value": {"const": 0.0}
+          },
+          "required": ["method", "value"]
+        },
+        "bounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minimum": {"const": 0.0},
+            "maximum": {"const": null}
+          },
+          "required": ["minimum", "maximum"]
+        }
+      },
+      "required": [
+        "enabled",
+        "scale_mode",
+        "interaction",
+        "initialization",
+        "bounds"
+      ]
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "encoding": {"enum": ["single_ended", "differential_pair"]},
+        "classes": {"const": 10}
+      },
+      "required": ["encoding", "classes"]
+    },
+    "loss": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {"const": "squared_error"},
+        "reduction": {"const": "mean"}
+      },
+      "required": ["method", "reduction"]
+    },
+    "trainingModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layer_shapes": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "integer", "minimum": 1}
+          }
+        },
+        "topology": {"const": "dense"},
+        "state_dtype": {"enum": ["float32", "float64"]},
+        "weight_gains": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "weight_bounds": {"$ref": "#/$defs/weightBounds"},
+        "weight_initialization": {"const": "kaiming_uniform"},
+        "input_gain": {"type": "number", "exclusiveMinimum": 0},
+        "input_encoding": {"const": "signed_pair"},
+        "amplification_learning": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "input_gain": {"const": false},
+            "voltage_factor": {"const": false},
+            "current_factor": {"const": false}
+          },
+          "required": ["input_gain", "voltage_factor", "current_factor"]
+        },
+        "bias": {"$ref": "#/$defs/bias"},
+        "signed_weights": {"type": "boolean"},
+        "output": {"$ref": "#/$defs/output"},
+        "loss": {"$ref": "#/$defs/loss"}
+      },
+      "required": [
+        "layer_shapes",
+        "topology",
+        "state_dtype",
+        "weight_gains",
+        "weight_bounds",
+        "weight_initialization",
+        "input_gain",
+        "input_encoding",
+        "amplification_learning",
+        "bias",
+        "signed_weights",
+        "output",
+        "loss"
+      ]
+    },
+    "replayModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layer_widths": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "topology": {"const": "dense"},
+        "state_dtype": {"const": "float32"},
+        "weight_gains": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "weight_bounds": {"$ref": "#/$defs/weightBounds"},
+        "weight_initialization": {"const": "kaiming_uniform"},
+        "input_gain": {"type": "number", "exclusiveMinimum": 0},
+        "input_encoding": {"const": "signed_pair"},
+        "amplification_learning": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "input_gain": {"const": false},
+            "voltage_factor": {"const": false},
+            "current_factor": {"const": false}
+          },
+          "required": ["input_gain", "voltage_factor", "current_factor"]
+        },
+        "bias": {"$ref": "#/$defs/bias"},
+        "signed_weights": {"type": "boolean"},
+        "output": {"$ref": "#/$defs/output"},
+        "loss": {"$ref": "#/$defs/loss"}
+      },
+      "required": [
+        "layer_widths",
+        "topology",
+        "state_dtype",
+        "weight_gains",
+        "weight_bounds",
+        "weight_initialization",
+        "input_gain",
+        "input_encoding",
+        "amplification_learning",
+        "bias",
+        "signed_weights",
+        "output",
+        "loss"
+      ]
+    }
+  }
+}

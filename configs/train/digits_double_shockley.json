@@ -1,42 +1,192 @@
 {
-  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/train/schema.json",
-  "description": "Compact sklearn Digits training configuration for the paper's double-Shockley nonlinearity.",
-  "dataset": {
-    "name": "digits",
-    "num_samples": null,
-    "train_fraction": 0.8
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/training-v2.schema.json",
+  "data": {
+    "preprocessing": {
+      "divisor": 16.0,
+      "dtype": "float32",
+      "method": "affine",
+      "multiplier": 2.0,
+      "offset": -1.0
+    },
+    "seed": 0,
+    "source": "sklearn_digits",
+    "split": {
+      "method": "seeded_random",
+      "rounding": "floor",
+      "train_fraction": 0.8
+    },
+    "subset": {
+      "method": "all"
+    }
   },
-  "layer_shapes": [[128], [32], [20]],
-  "non_linearity": "double_diode_exponential",
-  "weight_gains": [1.0, 1.0],
-  "weight_min": 1e-7,
-  "weight_max": 100.0,
-  "weight_init_mode": "kaiming_uniform",
-  "input_gain": 10.0,
-  "voltage_amp": 4.0,
-  "current_amp": 1.0,
-  "exponential_diode_param": {"I_s": 1e-6, "V_t": 0.05, "V_off": 0.8},
-  "batch_size": 32,
-  "num_epochs": 15,
-  "num_iterations": 4,
-  "learning_rates": [0.01, 0.01, 0.01],
-  "scheduler_gamma": 1.0,
-  "nudging": 0.1,
-  "ep_variant": "centered",
-  "minimizer_impl": "custom",
-  "mode": "asynchronous",
-  "single_diode_updater": "custom",
-  "double_diode_updater": "float64_overrelaxed",
-  "overrelaxation_factor": 1.2,
-  "adaptive_equilibrium": false,
-  "rel_tol": 1e-5,
-  "vn_tol": 1e-6,
-  "use_polish": false,
-  "max_newton_iters": 32,
-  "z_thresh": 1e10,
-  "exp_clip": 165.0,
-  "damping": 0.5,
-  "experimental_newton_max_steps": 32,
-  "experimental_newton_tol": 1e-5,
-  "seed": 0
+  "description": "Compact sklearn Digits training configuration for the paper's double-Shockley nonlinearity.",
+  "equilibrium": {
+    "initial_state": "zeros",
+    "method": "fixed_sweeps",
+    "sweeps": 4,
+    "update_order": "asynchronous"
+  },
+  "execution_ref": {
+    "path": "configs/execution/reference_cpu.json",
+    "sha256": "59a17593f198295732c9c675b6437f7536abc4bff7a08705e01dda7162459bc1"
+  },
+  "kind": "training",
+  "model": {
+    "amplification_learning": {
+      "current_factor": false,
+      "input_gain": false,
+      "voltage_factor": false
+    },
+    "bias": {
+      "bounds": {
+        "maximum": null,
+        "minimum": 0.0
+      },
+      "enabled": true,
+      "initialization": {
+        "method": "constant",
+        "value": 0.0
+      },
+      "interaction": "linear",
+      "scale_mode": "legacy"
+    },
+    "input_encoding": "signed_pair",
+    "input_gain": 10.0,
+    "layer_shapes": [
+      [
+        128
+      ],
+      [
+        32
+      ],
+      [
+        20
+      ]
+    ],
+    "loss": {
+      "method": "squared_error",
+      "reduction": "mean"
+    },
+    "output": {
+      "classes": 10,
+      "encoding": "differential_pair"
+    },
+    "signed_weights": false,
+    "state_dtype": "float32",
+    "topology": "dense",
+    "weight_bounds": {
+      "maximum": 100.0,
+      "minimum": 1e-07
+    },
+    "weight_gains": [
+      1.0,
+      1.0
+    ],
+    "weight_initialization": "kaiming_uniform"
+  },
+  "provenance": {
+    "materialized_defaults": [
+      "data.preprocessing.divisor",
+      "data.preprocessing.dtype",
+      "data.preprocessing.method",
+      "data.preprocessing.multiplier",
+      "data.preprocessing.offset",
+      "data.split.method",
+      "data.split.rounding",
+      "data.subset.method",
+      "equilibrium.initial_state",
+      "model.amplification_learning",
+      "model.bias.bounds",
+      "model.bias.enabled",
+      "model.bias.initialization",
+      "model.bias.interaction",
+      "model.bias.scale_mode",
+      "model.input_encoding",
+      "model.loss",
+      "model.output",
+      "model.signed_weights",
+      "model.state_dtype",
+      "model.topology",
+      "training.batch_limits",
+      "training.checkpoint",
+      "training.equilibrium_propagation.gradient_formula",
+      "training.equilibrium_propagation.nudging_mode",
+      "training.loader.drop_last",
+      "training.loader.evaluation_shuffle",
+      "training.loader.train_shuffle",
+      "training.optimizer.dampening",
+      "training.optimizer.differentiable",
+      "training.optimizer.foreach",
+      "training.optimizer.fused",
+      "training.optimizer.maximize",
+      "training.optimizer.method",
+      "training.optimizer.momentum",
+      "training.optimizer.nesterov",
+      "training.optimizer.weight_decay",
+      "training.optimizer.zero_grad_set_to_none",
+      "training.scheduler.initial_epoch",
+      "training.scheduler.method",
+      "training.scheduler.step_timing"
+    ],
+    "migration": {
+      "from_schema_version": 1,
+      "to_schema_version": 2,
+      "tool": "scripts/migrate_training_configs.py"
+    }
+  },
+  "schema_version": 2,
+  "simulation_ref": {
+    "path": "configs/simulator/default_double_shockley.json",
+    "sha256": "6415fbebbf2f3c751f012f03577fee23f92c0a5c95daeb8b861325441c0fdd06"
+  },
+  "training": {
+    "batch_limits": {
+      "evaluation": null,
+      "train": null
+    },
+    "checkpoint": {
+      "save_best": {
+        "metric": "evaluation_accuracy",
+        "mode": "max",
+        "tie_break": "first"
+      },
+      "save_final": true
+    },
+    "epochs": 15,
+    "equilibrium_propagation": {
+      "gradient_formula": "standard",
+      "nudging": 0.1,
+      "nudging_mode": "cost",
+      "variant": "centered"
+    },
+    "loader": {
+      "batch_size": 32,
+      "drop_last": false,
+      "evaluation_shuffle": false,
+      "train_shuffle": true
+    },
+    "optimizer": {
+      "dampening": 0.0,
+      "differentiable": false,
+      "foreach": false,
+      "fused": false,
+      "learning_rates": [
+        0.01,
+        0.01,
+        0.01
+      ],
+      "maximize": false,
+      "method": "sgd",
+      "momentum": 0.0,
+      "nesterov": false,
+      "weight_decay": 0.0,
+      "zero_grad_set_to_none": true
+    },
+    "scheduler": {
+      "gamma": 1.0,
+      "initial_epoch": -1,
+      "method": "exponential",
+      "step_timing": "after_epoch"
+    }
+  }
 }

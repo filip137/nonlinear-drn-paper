@@ -1,28 +1,190 @@
 {
-  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/train/schema.json",
-  "description": "Editable MNIST starter configuration for a sampled custom I-V curve.",
-  "source": "Uses the validated Digits measured/PWL training choices with MNIST preprocessing and a 100-node hidden layer; this starter is not a new paper result.",
-  "dataset": {
-    "name": "mnist",
-    "root": "data/external/mnist",
-    "normalize": true,
-    "normalize_mean": 0.1307,
-    "normalize_standard_deviation": 0.3081,
-    "normalize_scale": 0.3
+  "$schema": "https://raw.githubusercontent.com/filip137/nonlinear-drn-paper/main/configs/schema/training-v2.schema.json",
+  "data": {
+    "path": "data/external/mnist",
+    "preprocessing": {
+      "dtype": "float32",
+      "mean": 0.1307,
+      "method": "normalized_tensor",
+      "scale": 0.3,
+      "standard_deviation": 0.3081
+    },
+    "seed": 0,
+    "source": "torchvision_mnist",
+    "split": {
+      "method": "official"
+    },
+    "subset": {
+      "method": "all"
+    }
   },
-  "layer_shapes": [[2, 28, 28], [100], [20]],
-  "simulator_profile": "configs/simulator/default_pwl.json",
-  "weight_gains": [1.0, 1.0],
-  "weight_min": 1e-7,
-  "weight_max": 100.0,
-  "weight_init_mode": "kaiming_uniform",
-  "input_gain": 10.0,
-  "batch_size": 10,
-  "num_epochs": 15,
-  "num_iterations": 4,
-  "learning_rates": [0.01, 0.01, 0.01],
-  "scheduler_gamma": 1.0,
-  "nudging": 0.1,
-  "ep_variant": "centered",
-  "seed": 0
+  "description": "Editable MNIST starter configuration for a sampled custom I-V curve.",
+  "equilibrium": {
+    "initial_state": "zeros",
+    "method": "fixed_sweeps",
+    "sweeps": 4,
+    "update_order": "asynchronous"
+  },
+  "execution_ref": {
+    "path": "configs/execution/reference_cpu.json",
+    "sha256": "59a17593f198295732c9c675b6437f7536abc4bff7a08705e01dda7162459bc1"
+  },
+  "kind": "training",
+  "model": {
+    "amplification_learning": {
+      "current_factor": false,
+      "input_gain": false,
+      "voltage_factor": false
+    },
+    "bias": {
+      "bounds": {
+        "maximum": null,
+        "minimum": 0.0
+      },
+      "enabled": true,
+      "initialization": {
+        "method": "constant",
+        "value": 0.0
+      },
+      "interaction": "linear",
+      "scale_mode": "legacy"
+    },
+    "input_encoding": "signed_pair",
+    "input_gain": 10.0,
+    "layer_shapes": [
+      [
+        2,
+        28,
+        28
+      ],
+      [
+        100
+      ],
+      [
+        20
+      ]
+    ],
+    "loss": {
+      "method": "squared_error",
+      "reduction": "mean"
+    },
+    "output": {
+      "classes": 10,
+      "encoding": "differential_pair"
+    },
+    "signed_weights": false,
+    "state_dtype": "float32",
+    "topology": "dense",
+    "weight_bounds": {
+      "maximum": 100.0,
+      "minimum": 1e-07
+    },
+    "weight_gains": [
+      1.0,
+      1.0
+    ],
+    "weight_initialization": "kaiming_uniform"
+  },
+  "provenance": {
+    "materialized_defaults": [
+      "data.preprocessing.dtype",
+      "data.preprocessing.method",
+      "data.split.method",
+      "data.subset.method",
+      "equilibrium.initial_state",
+      "model.amplification_learning",
+      "model.bias.bounds",
+      "model.bias.enabled",
+      "model.bias.initialization",
+      "model.bias.interaction",
+      "model.bias.scale_mode",
+      "model.input_encoding",
+      "model.loss",
+      "model.output",
+      "model.signed_weights",
+      "model.state_dtype",
+      "model.topology",
+      "training.batch_limits",
+      "training.checkpoint",
+      "training.equilibrium_propagation.gradient_formula",
+      "training.equilibrium_propagation.nudging_mode",
+      "training.loader.drop_last",
+      "training.loader.evaluation_shuffle",
+      "training.loader.train_shuffle",
+      "training.optimizer.dampening",
+      "training.optimizer.differentiable",
+      "training.optimizer.foreach",
+      "training.optimizer.fused",
+      "training.optimizer.maximize",
+      "training.optimizer.method",
+      "training.optimizer.momentum",
+      "training.optimizer.nesterov",
+      "training.optimizer.weight_decay",
+      "training.optimizer.zero_grad_set_to_none",
+      "training.scheduler.initial_epoch",
+      "training.scheduler.method",
+      "training.scheduler.step_timing"
+    ],
+    "migration": {
+      "from_schema_version": 1,
+      "to_schema_version": 2,
+      "tool": "scripts/migrate_training_configs.py"
+    },
+    "source": "Uses the validated Digits measured/PWL training choices with MNIST preprocessing and a 100-node hidden layer; this starter is not a new paper result."
+  },
+  "schema_version": 2,
+  "simulation_ref": {
+    "path": "configs/simulator/default_pwl.json",
+    "sha256": "c4cf1d5a67a51fbc10e4a9527692b7dada9073622d043e0af2768e5f88372612"
+  },
+  "training": {
+    "batch_limits": {
+      "evaluation": null,
+      "train": null
+    },
+    "checkpoint": {
+      "save_best": {
+        "metric": "evaluation_accuracy",
+        "mode": "max",
+        "tie_break": "first"
+      },
+      "save_final": true
+    },
+    "epochs": 15,
+    "equilibrium_propagation": {
+      "gradient_formula": "standard",
+      "nudging": 0.1,
+      "nudging_mode": "cost",
+      "variant": "centered"
+    },
+    "loader": {
+      "batch_size": 10,
+      "drop_last": false,
+      "evaluation_shuffle": false,
+      "train_shuffle": true
+    },
+    "optimizer": {
+      "dampening": 0.0,
+      "differentiable": false,
+      "foreach": false,
+      "fused": false,
+      "learning_rates": [
+        0.01,
+        0.01,
+        0.01
+      ],
+      "maximize": false,
+      "method": "sgd",
+      "momentum": 0.0,
+      "nesterov": false,
+      "weight_decay": 0.0,
+      "zero_grad_set_to_none": true
+    },
+    "scheduler": {
+      "gamma": 1.0,
+      "initial_epoch": -1,
+      "method": "exponential",
+      "step_timing": "after_epoch"
+    }
+  }
 }

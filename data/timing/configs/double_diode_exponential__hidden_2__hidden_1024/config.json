@@ -1,66 +1,180 @@
 {
-  "adaptive_equilibrium": true,
-  "anderson_m": 8,
-  "anderson_omega": 1.0,
-  "anderson_reg": 1e-08,
-  "anderson_tol_floor": 0.005,
-  "batch_size": 1,
-  "current_amp": 1.0,
-  "damping": 0.5,
-  "dims": [
-    128,
-    1024,
-    1024,
-    20
-  ],
-  "double_diode_updater": "float64_overrelaxed",
-  "dynamic_polish": false,
-  "exp_clip": 165,
-  "experimental_newton_max_steps": 8,
-  "experimental_newton_tol": 1e-05,
-  "exponential_diode_param": {
-    "I_s": 1e-06,
-    "V_off": 0.8,
-    "V_t": 0.05
+  "data": {
+    "loader": {
+      "batch_size": 1,
+      "drop_last": false,
+      "shuffle": false
+    },
+    "preprocessing": {
+      "input_dtype": "float32",
+      "input_offset": -1.0,
+      "input_scale": 0.125,
+      "target_dtype": "int64"
+    },
+    "seed": 0,
+    "source": {
+      "loader": "sklearn.datasets.load_digits",
+      "name": "digits"
+    },
+    "split": {
+      "method": "random_fraction",
+      "rounding": "floor",
+      "train_fraction": 0.8
+    },
+    "subset": {
+      "max_points": 2000,
+      "method": "random_max_points"
+    }
   },
-  "hard_sigmoid_param": {
-    "g_off": 0.1,
-    "g_on": 10,
-    "v_max": 1,
-    "v_min": -1
+  "equilibrium": {
+    "absolute_tolerance": 1e-06,
+    "initial_state": "zeros",
+    "max_sweeps": 512,
+    "method": "voltage_change",
+    "relative_tolerance": 1e-05,
+    "update_order": "asynchronous"
   },
-  "input_gain": 10.0,
-  "learning_rate": [
-    0.05,
-    0.1,
-    0.1
-  ],
-  "linspace_max": 10.0,
-  "linspace_min": -10.0,
-  "linspace_samples": 30,
-  "max_newton_iters": 8,
-  "minimizer_impl": "custom",
-  "non_linearity": "double_diode_exponential",
-  "nudging": 0.01,
-  "num_epochs": 20,
-  "num_iterations": 512,
-  "overrelaxation_factor": 1.4,
-  "quadratic_diode_param": {
-    "diode_conductance": 1,
-    "v_max": 0.5,
-    "v_min": -0.5
+  "kind": "replay",
+  "model": {
+    "amplification_learning": {
+      "current_factor": false,
+      "input_gain": false,
+      "voltage_factor": false
+    },
+    "bias": {
+      "bounds": {
+        "maximum": null,
+        "minimum": 0.0
+      },
+      "enabled": true,
+      "initialization": {
+        "method": "constant",
+        "value": 0.0
+      },
+      "interaction": "linear",
+      "scale_mode": "legacy"
+    },
+    "input_encoding": "signed_pair",
+    "input_gain": 10.0,
+    "layer_widths": [
+      128,
+      1024,
+      1024,
+      20
+    ],
+    "loss": {
+      "method": "squared_error",
+      "reduction": "mean"
+    },
+    "output": {
+      "classes": 10,
+      "encoding": "differential_pair"
+    },
+    "signed_weights": false,
+    "state_dtype": "float32",
+    "topology": "dense",
+    "weight_bounds": {
+      "maximum": 100.0,
+      "minimum": 1e-07
+    },
+    "weight_gains": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "weight_initialization": "kaiming_uniform"
   },
-  "rel_tol": 1e-05,
-  "single_diode_updater": "custom",
-  "use_polish": true,
-  "vn_tol": 1e-06,
-  "voltage_amp": 4.0,
-  "weight_gains": [
-    1,
-    1,
-    1
-  ],
-  "weight_max": 100.0,
-  "weight_min": 1e-07,
-  "z_thresh": 10000000000.0
+  "provenance": {
+    "historical_unused": {
+      "anderson_m": 8,
+      "anderson_omega": 1.0,
+      "anderson_reg": 1e-08,
+      "anderson_tol_floor": 0.005,
+      "damping": 0.5,
+      "dynamic_polish": false,
+      "experimental_newton_max_steps": 8,
+      "experimental_newton_tol": 1e-05,
+      "hard_sigmoid_param": {
+        "g_off": 0.1,
+        "g_on": 10,
+        "v_max": 1,
+        "v_min": -1
+      },
+      "learning_rate": [
+        0.05,
+        0.1,
+        0.1
+      ],
+      "linspace_max": 10.0,
+      "linspace_min": -10.0,
+      "linspace_samples": 30,
+      "nudging": 0.01,
+      "num_epochs": 20,
+      "quadratic_diode_param": {
+        "diode_conductance": 1,
+        "v_max": 0.5,
+        "v_min": -0.5
+      },
+      "single_diode_updater": "custom"
+    },
+    "materialized_defaults": [
+      "data.loader.drop_last",
+      "data.preprocessing",
+      "data.seed",
+      "data.split",
+      "data.split.rounding",
+      "data.subset",
+      "equilibrium.initial_state",
+      "equilibrium.update_order",
+      "model.amplification_learning",
+      "model.bias.bounds",
+      "model.bias.enabled",
+      "model.bias.initialization",
+      "model.bias.interaction",
+      "model.bias.scale_mode",
+      "model.input_encoding",
+      "model.signed_weights",
+      "model.state_dtype",
+      "model.topology",
+      "model.weight_initialization",
+      "simulation.updater.backend",
+      "simulation.updater.linear_coefficient_clamp",
+      "simulation.updater.polish.max_steps_semantics"
+    ],
+    "migration": {
+      "from": "legacy_flat_replay_v1",
+      "tool": "scripts/migrate_replay_configs.py"
+    }
+  },
+  "schema_version": 2,
+  "simulation": {
+    "amplification": {
+      "current_factor": 1.0,
+      "voltage_factor": 4.0
+    },
+    "nonlinearity": "double_diode_exponential",
+    "physical": {
+      "offset_voltage": 0.8,
+      "saturation_current": 1e-06,
+      "thermal_voltage": 0.05
+    },
+    "updater": {
+      "asymptotic_terms": 4,
+      "asymptotic_threshold": 10000000000.0,
+      "backend": "torchlambertw",
+      "dtype": "float64",
+      "exponent_clip": 165.0,
+      "linear_coefficient_clamp": 1000000.0,
+      "method": "lambert_w_v1",
+      "polish": {
+        "max_steps": 7,
+        "method": "newton_v1",
+        "residual_tolerance": {
+          "coefficient": 1e-06,
+          "rule": "batch_scaled_absolute"
+        }
+      },
+      "relaxation": 1.4
+    }
+  }
 }

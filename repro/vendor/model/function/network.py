@@ -19,7 +19,7 @@ class Network():
         Return the list of free layers (free to stabilize to equilibrium)
     """
 
-    def __init__(self, function):
+    def __init__(self, function, *, input_mode):
         """Creates an instance of Network.
 
         Args:
@@ -28,6 +28,7 @@ class Network():
         """
 
         self._function = function
+        self._input_mode = input_mode
 
         self._input_layer = function.layers()[0]
         self._last_input_values = None
@@ -55,7 +56,10 @@ class Network():
 
         # we set the input tensor on the network's device
         self._last_input_values = input_values.to(self._function._device)
-        self._input_layer.set_input(self._last_input_values)  # FIXME
+        self._input_layer.set_input(
+            self._last_input_values,
+            mode=self._input_mode,
+        )  # FIXME
 
         # we set the state of the network to zero if reset is True, or if the size of the batch of examples is different from the previous batch size.
         if reset or batch_size != old_batch_size:

@@ -32,13 +32,15 @@ def test_one_batch_training_is_finite(
     result = run_training(
         ROOT,
         ROOT / "configs" / "train" / config_name,
-        device="cpu",
         output_dir=tmp_path / Path(config_name).stem,
-        epochs=1,
-        num_iterations=2,
-        max_batches=1,
-        max_eval_batches=1,
+        overrides=(
+            "/training/epochs=1",
+            "/equilibrium/sweeps=2",
+            "/training/batch_limits/train=1",
+            "/training/batch_limits/evaluation=1",
+        ),
     )
+    assert result.final_checkpoint is not None
     assert result.final_checkpoint.is_file()
     assert result.best_checkpoint.is_file()
     for values in result.history.values():
@@ -46,10 +48,44 @@ def test_one_batch_training_is_finite(
         assert math.isfinite(values[0])
     metadata = json.loads((result.output_dir / "run_metadata.json").read_text())
     assert metadata["final_checkpoint_sha256"]
+    receipt = json.loads(result.receipt_path.read_text())
+    assert receipt["resolved_config_sha256"]
+    assert receipt["data_fingerprint"]
+    assert receipt["split_fingerprint"]
+    sources = {item["owner"]: item for item in receipt["source_documents"]}
+    assert set(sources) == {"training", "simulation", "execution"}
+    assert all(len(item["sha256"]) == 64 for item in sources.values())
     output = capsys.readouterr().out
     assert "train epoch=1/1 batch=1/1" in output
     assert "eval epoch=1/1 batch=1/1" in output
     assert "accuracy=" in output
+
+
+def test_float64_training_config_controls_inputs_parameters_and_targets(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = run_training(
+        ROOT,
+        ROOT / "configs" / "train" / "default_single_shockley.json",
+        output_dir=tmp_path / "float64",
+        overrides=(
+            "/data/preprocessing/dtype=\"float64\"",
+            "/model/state_dtype=\"float64\"",
+            "/execution/backend/default_dtype=\"float64\"",
+            "/training/epochs=1",
+            "/equilibrium/sweeps=2",
+            "/training/batch_limits/train=1",
+            "/training/batch_limits/evaluation=1",
+        ),
+    )
+
+    assert result.final_checkpoint is not None
+    receipt = json.loads(result.receipt_path.read_text())
+    assert receipt["execution"]["backend"]["default_dtype"] == "float64"
+    assert receipt["runtime"]["default_dtype"] == "float64"
+    assert all(math.isfinite(values[0]) for values in result.history.values())
+    capsys.readouterr()
 
 
 def test_live_progress_refreshes_every_batch_in_a_terminal() -> None:

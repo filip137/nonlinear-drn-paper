@@ -1,8 +1,9 @@
-"""Load measured current-voltage data at the reproducibility-app boundary."""
+"""Load explicitly configured current-voltage data."""
 
 from __future__ import annotations
 
-import os
+import hashlib
+import io
 from pathlib import Path
 
 import numpy as np
@@ -12,30 +13,26 @@ import torch
 def load_iv_data(
     configured_path: str | Path | None,
     *,
-    use_environment_override: bool = True,
+    expected_sha256: str | None = None,
 ) -> torch.Tensor:
     """Return measured I-V samples as a 2xN tensor.
 
     File-system and NumPy concerns intentionally stay outside the vendored model
-    package. ``LABS_IV_CURVE_PATH`` remains the highest-priority historical
-    override used by the original experiment scripts. Config builders can
-    disable that override when validating the exact path they will serialize.
+    package.  The path is deliberately explicit: environment variables must not
+    be able to replace a checksummed scientific input behind the configuration's
+    back.
     """
 
-    environment_path = (
-        os.environ.get("LABS_IV_CURVE_PATH") if use_environment_override else None
-    )
-    candidate = environment_path or configured_path
-    if candidate is None:
+    if configured_path is None:
         raise FileNotFoundError(
-            "Expected experimental IV curve path via LABS_IV_CURVE_PATH or config "
-            "'iv_data_path' (existing .npz file). Provided value: None."
+            "Expected the configured experimental IV curve path to name an "
+            "existing .npz file. Provided value: None."
         )
-    path = Path(candidate).expanduser()
+    path = Path(configured_path).expanduser()
     if not path.is_file():
         raise FileNotFoundError(
-            "Expected experimental IV curve path via LABS_IV_CURVE_PATH or config "
-            f"'iv_data_path' (existing .npz file). Provided value: {path}"
+            "Expected the configured experimental IV curve path to name an "
+            f"existing .npz file. Provided value: {path}"
         )
     if path.suffix.lower() != ".npz":
         raise ValueError(
@@ -43,7 +40,19 @@ def load_iv_data(
             f"Provided value: {path}."
         )
 
-    with np.load(path, allow_pickle=False) as data:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise FileNotFoundError(f"Could not read configured IV data {path}: {exc}.") from exc
+    if expected_sha256 is not None:
+        actual = hashlib.sha256(raw).hexdigest()
+        if actual != expected_sha256:
+            raise ValueError(
+                "Expected experimental IV data SHA256 to match its configuration. "
+                f"Provided value: path={path}, expected={expected_sha256}, actual={actual}."
+            )
+
+    with np.load(io.BytesIO(raw), allow_pickle=False) as data:
         if "iv" in data:
             iv = np.asarray(data["iv"])
             if iv.ndim != 2 or iv.shape[0] != 2:
