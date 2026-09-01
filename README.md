@@ -70,18 +70,23 @@ for Python 3.13.
 
 ## Quick demo: simulate a small network
 
-Run the bundled hand-specified network example:
+`simulate_small_network` is intended for small, manually specified toy
+networks. In the JSON configuration, you write the layer sizes, one conductance
+matrix for each pair of adjacent layers, and the input-voltage rows to apply.
+The simulator uses those values directly, without training or loading a model
+checkpoint.
+
+Run the bundled editable example:
 
 ```bash
 python scripts/small_network.py \
   --config configs/small_network/example.json
 ```
 
-The command needs no dataset or trained checkpoint. It prints the hidden and
-output voltages, convergence status, number of solver sweeps, and resolved
-configuration hash. The example configuration contains the physical
-conductances, input voltages, input gain, explicit no-bias policy, device model,
-and solver settings.
+The command prints the hidden and output voltages, convergence status, number
+of solver sweeps, and resolved configuration hash. The example configuration
+also records the input gain, explicit no-bias policy, device model, and solver
+settings.
 
 ## Train a model
 
