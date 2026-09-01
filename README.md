@@ -14,9 +14,8 @@ It supports the three nonlinearities evaluated in the paper:
 It serves three purposes:
 
 1. **Reproducing figures and tables:** regenerate every data-driven paper asset from the
-   bundled curated inputs; copy the six source schematics into the same output
-   tree.
-2. **Reproducing numerical results:** rerun selected Digits checkpoints with coordinate
+   bundled curated inputs.
+2. **Reproducing numerical results:** rerun selected networks with the coordinate
    descent and compare node voltages against bundled SPICE reference states.
 3. **Training:** train dense DRNs with EqProp using any of
    the three paper nonlinearities.
