@@ -70,23 +70,18 @@ for Python 3.13.
 
 ## Quick demo: simulate a small network
 
-`simulate_small_network` is intended for small, manually specified toy
-networks. In the JSON configuration, you write the layer sizes, one conductance
-matrix for each pair of adjacent layers, and the input-voltage rows to apply.
-The simulator uses those values directly, without training or loading a model
-checkpoint.
-
-Run the bundled editable example:
+Use `simulate_small_network` to simulate a toy network defined directly in
+JSON. The user provides the conductance matrices, input voltages, and diode
+parameters; no training or model checkpoint is involved. Start from the bundled
+editable example and run:
 
 ```bash
 python scripts/small_network.py \
   --config configs/small_network/example.json
 ```
 
-The command prints the hidden and output voltages, convergence status, number
-of solver sweeps, and resolved configuration hash. The example configuration
-also records the input gain, explicit no-bias policy, device model, and solver
-settings.
+The command prints the settled hidden and output voltages together with the
+convergence information.
 
 ## Train a model
 
@@ -148,75 +143,6 @@ single-Shockley and measured/PWL files are Digits-derived starting points for
 new experiments. See [MNIST reproduction notes](docs/MNIST_REPRODUCTION.md)
 for the reported aggregate and original-seed limitation.
 
-## Customize the small-network demo
-
-The input width is the number of physical voltage-source nodes; the
-small-network API does not create positive and negative input channels.
-Conductance matrix `k` has shape
-`(layer_sizes[k], layer_sizes[k + 1])`. Its entries must be finite and
-non-negative, and every free node must have positive incident conductance.
-
-### Generate an input sweep
-
-Sweep every physical input node over the same range. For the two-input example,
-five points per node produce `5² = 25` input-voltage sets. The generated,
-complete configuration is written before simulation:
-
-```bash
-mkdir -p configs/local
-python scripts/small_network.py \
-  --config configs/small_network/example.json \
-  --sweep-inputs \
-  --sweep-min -1 \
-  --sweep-max 1 \
-  --sweep-points 5 \
-  --write-config configs/local/small_network_sweep.json
-```
-
-`make_input_voltage_sweep` constructs the Cartesian product, so `P` points for
-`N` input nodes create `P**N` voltage sets; the last input node changes fastest.
-Requests above one million combinations are rejected before allocation.
-Explicit input-voltage rows are preferable when only selected combinations are
-needed.
-
-### Use the Python API
-
-```python
-from copy import deepcopy
-
-from repro import (
-    load_small_network_config,
-    make_input_voltage_sweep,
-    simulate_small_network,
-)
-
-config = load_small_network_config("configs/small_network/example.json")
-config = deepcopy(config)
-inputs = make_input_voltage_sweep(
-    config["network"]["layer_sizes"][0],
-    voltage_min=-1.0,
-    voltage_max=1.0,
-    num_points=5,
-    dtype=config["network"]["state_dtype"],
-)
-config["network"]["input_voltages"] = inputs.tolist()
-config["provenance"]["generation_overrides"] = [
-    {"pointer": "/network/input_voltages", "value": inputs.tolist()}
-]
-
-result = simulate_small_network(config)
-print(result.hidden_voltages[0])
-print(result.output_voltages)
-print(result.converged, result.sweeps)
-print(result.receipt["resolved_config_sha256"])
-```
-
-Single-Shockley hidden widths must be even: the first half uses forward and the
-second half reverse diode orientation. `fixed_sweeps` reports
-`converged=None`; asynchronous `voltage_change` reports whether its relative
-and absolute criterion was met. The API performs no file writes and returns its
-receipt with the voltages.
-
 ## Use a custom measured I–V curve
 
 The measured/PWL family accepts an NPZ containing either equal-length 1-D `i`
@@ -245,24 +171,6 @@ choose `extrapolation` (`clamp` or `linear`) and `nonconvergence_policy`
 (`accept_last` or `error`) explicitly, then update a copied training source's
 `simulation_ref` with the copied profile's path and SHA-256. See
 [Adding a nonlinearity](docs/ADDING_NONLINEARITY.md) for the complete workflow.
-
-## Reproducibility model
-
-Scientific entry points consume strict version-2 JSON. Training, simulator,
-execution, replay, and hand-specified-network settings each have one owner;
-cross-file references include both a repository-relative path and the exact
-SHA-256. The resolver verifies and validates every source, rejects collisions,
-expands one self-contained snapshot, and validates it again before numerical
-work. Unknown, duplicate, aliased, missing, inactive-family, or incorrectly
-typed values fail closed.
-
-Scientific CLI changes are recorded JSON-Pointer overrides used to generate a
-complete configuration, not hidden runtime arguments. Training and replay
-write that snapshot before loading data and finish with a receipt covering
-configuration, source, and asset hashes; data and split fingerprints; git
-state; packages; platform; device; and deterministic execution. See the
-[configuration reference](docs/CONFIG_REFERENCE.md) and
-[training guide](docs/TRAINING_RUNNER.md).
 
 ## Run outputs and receipts
 
@@ -334,8 +242,12 @@ python scripts/reproduce.py mnist-figures
 
 ### Replay the numerical results
 
-List the 195 manifest jobs, run one CPU validation, and compare it with its
-bundled SPICE reference:
+Choose either the quick spot check or the complete replay below. Validation
+jobs require new or empty output directories so stale artifacts cannot be
+reused.
+
+For the spot check, list the 195 manifest jobs, run one CPU validation, and
+compare it with its bundled SPICE reference:
 
 ```bash
 python scripts/reproduce.py list
@@ -343,7 +255,8 @@ python scripts/reproduce.py validate --group timing --limit 1
 python scripts/reproduce.py compare --group timing --limit 1
 ```
 
-Run the complete manifest with:
+Alternatively, with no existing validation outputs, run the complete manifest
+with:
 
 ```bash
 python scripts/reproduce.py all
