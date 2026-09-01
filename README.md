@@ -92,6 +92,70 @@ audited solver configuration, evaluates all 360 held-out examples, and prints
 the resulting accuracy (95.0% on the supported reference environments). It
 does not train, download data, or create output files.
 
+## Simulate a hand-specified small network
+
+Use the small-network helper when you want node voltages for literal physical
+conductances rather than a trained checkpoint. The input width is the number
+of voltage-source nodes: the helper applies those voltages directly and does
+not create positive and negative input channels.
+
+Run the editable example:
+
+```bash
+python scripts/small_network.py
+```
+
+Or define a network in Python:
+
+```python
+import numpy as np
+
+from repro import simulate_small_network
+
+result = simulate_small_network(
+    layer_sizes=[2, 4, 2],
+    conductances=[
+        np.array([
+            [1.0, 0.2, 0.8, 0.4],
+            [0.3, 1.1, 0.5, 0.9],
+        ]),
+        np.array([
+            [0.8, 0.2],
+            [0.4, 1.0],
+            [1.1, 0.3],
+            [0.2, 0.7],
+        ]),
+    ],
+    input_voltages=np.array([
+        [0.2, -0.1],
+        [0.7, 0.3],
+    ]),
+    non_linearity="double",
+    shockley_parameters={"I_s": 1e-6, "V_t": 0.05, "V_off": 0.8},
+    adaptive_equilibrium=True,
+)
+
+print(result.hidden_voltages[0])
+print(result.output_voltages)
+print(result.converged, result.sweeps)
+```
+
+Each conductance matrix has shape `(previous_layer, next_layer)`, all entries
+must be finite and non-negative, and each row of `input_voltages` is simulated
+independently. The hidden layers use the selected grounded nonlinearity while
+the output layer is linear. The accepted selectors are `single`, `double`, and
+`pwl`. Single Shockley requires even hidden widths: the first half of each
+hidden layer uses forward-oriented diodes and the second half reverse-oriented
+diodes.
+
+The default Shockley dictionary is `{"I_s": 1e-6, "V_t": 0.05, "V_off":
+0.8}`. PWL uses
+`data/assets/experimental_curve_voff_0.8_200_points.npz` unless
+`iv_data_path` is replaced. Adaptive settling stops once the voltage-change
+criterion is met, up to `max_sweeps=128`; set `adaptive_equilibrium=False` to
+run exactly 128 sweeps. Both modes report convergence in the returned result
+and warn if the final voltages do not meet the configured tolerance.
+
 ## Train a model
 
 ### Digits
