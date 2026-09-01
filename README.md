@@ -59,9 +59,8 @@ python scripts/reproduce.py verify --device cuda
 ```
 
 `verify` checks the installed scientific packages and the integrity of the
-bundled inputs. With
-`--device cuda`, it also checks that PyTorch can initialize CUDA. CUDA runs
-fail explicitly instead of silently falling back to CPU.
+bundled inputs. With `--device cuda`, it also checks that PyTorch can initialize
+CUDA. CUDA runs fail explicitly instead of silently falling back to CPU.
 
 The requirement files select matched versions automatically: PyTorch
 2.5.1/Torchvision 0.20.1 for Python 3.12, or PyTorch 2.6.0/Torchvision 0.21.0
@@ -71,8 +70,8 @@ for Python 3.13.
 
 Use `simulate_small_network` to simulate a toy network defined directly in
 JSON. The user provides the conductance matrices, input voltages, and diode
-parameters; no training is done and the function simply sweeps through the input voltages. Start from the
-editable example and run:
+parameters; no training is done and the function simply sweeps through the
+input voltages. Start from the editable example and run:
 
 ```bash
 python scripts/small_network.py \
@@ -144,65 +143,10 @@ for the reported aggregate and original-seed limitation.
 
 ## Use a custom measured I–V curve
 
-The measured/PWL family accepts an NPZ containing either equal-length 1-D `i`
-and `v` arrays or one `(2, N)` `iv` array in current-then-voltage order. Values
-must be real and finite, voltage strictly increasing, and current
-nondecreasing.
-
-Create `configs/local/` before writing the local asset:
-
-```bash
-mkdir -p configs/local
-```
-
-```python
-import numpy as np
-
-voltage = np.linspace(-1.5, 1.5, 301)
-current = 1e-3 * voltage + 2e-3 * voltage**3
-np.savez("configs/local/my_curve.npz", i=current, v=voltage)
-```
-
-A curve is never selected by an environment variable or an unrecorded runtime
-flag. Copy `configs/simulator/default_pwl.json`, replace
-`simulation.updater.curve` with the new repository-relative path and SHA-256,
-choose `extrapolation` (`clamp` or `linear`) and `nonconvergence_policy`
-(`accept_last` or `error`) explicitly, then update a copied training source's
-`simulation_ref` with the copied profile's path and SHA-256. See
-[Adding a nonlinearity](docs/ADDING_NONLINEARITY.md) for the complete workflow.
-
-## Run outputs and receipts
-
-Training and replay output directories contain the complete
-`config.resolved.json` before numerical work begins. Training additionally
-writes `history.json`, best/final checkpoints according to config policy,
-`run_metadata.json`, and `run_receipt.json`. The receipt, rather than mutable
-process state, records what ran. The demo and small-network API intentionally
-write nothing; their result objects carry the same receipt information in
-memory.
-
-## Repository map
-
-- `configs/schema/`: shared strict v2 JSON Schemas.
-- `configs/train/`: data/model/training/equilibrium sources with hashed refs.
-- `configs/simulator/`: typed physical and coordinate-updater profiles.
-- `configs/execution/`: deterministic CPU and CUDA profiles.
-- `configs/small_network/`: complete hand-specified network examples.
-- `data/manifest.json`: strict replay jobs and hashed artifact references.
-- `data/checksums.sha256`: the repository artifact integrity index.
-- `repro/strict_config.py`: strict parsing, validation, composition, hashing,
-  and JSON-Pointer overrides.
-- `repro/minimizer_factory.py`: the single v2-config-to-model translation
-  boundary.
-- `repro/vendor/model/resistive/minimizer.py`: coordinate updater
-  implementations in the original model layout.
-- `scripts/reproduce.py`: paper reproduction entry point.
-- `scripts/train_drn.py`: resolve-then-train entry point.
-- `scripts/small_network.py`: config-only physical-network entry point.
-- `tests/`: schema, integrity, numerical, plotting, and training checks.
-
-See [data provenance](docs/DATA_PROVENANCE.md) and
-`paper/figure_manifest.json` for the source-selection and paper-asset maps.
+To use measured device data, start from
+`configs/simulator/default_pwl.json` and reference the NPZ curve by its path and
+SHA-256. See [Adding a nonlinearity](docs/ADDING_NONLINEARITY.md) for the
+accepted array formats and complete workflow.
 
 ## Reproduce the scientific results
 
