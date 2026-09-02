@@ -93,21 +93,19 @@ python scripts/train_drn.py \
   --config configs/train/digits_double_shockley.json
 ```
 
-For a quick, auditable end-to-end check, first generate a complete snapshot
-with explicit overrides, then run that snapshot:
+For a short training run, first generate a complete snapshot with explicit
+overrides, then run that snapshot:
 
 ```bash
 mkdir -p configs/local
 python scripts/train_drn.py \
   --config configs/train/digits_double_shockley.json \
-  --override '/training/epochs=1' \
-  --override '/equilibrium/sweeps=2' \
-  --override '/training/batch_limits/train=1' \
-  --override '/training/batch_limits/evaluation=1' \
-  --write-config configs/local/digits_double_smoke.json
+  --override '/training/epochs=10' \
+  --override '/equilibrium/sweeps=4' \
+  --write-config configs/local/digits_double_short_training_run.json
 
 python scripts/train_drn.py \
-  --config configs/local/digits_double_smoke.json
+  --config configs/local/digits_double_short_training_run.json
 ```
 
 Each override is `JSON_POINTER=JSON_VALUE`; the value is parsed as JSON, so
