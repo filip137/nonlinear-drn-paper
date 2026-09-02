@@ -18,6 +18,8 @@ from repro.train import load_training_config
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "configs" / "train" / "digits_double_shockley.json"
+PWL_SOURCE = ROOT / "configs" / "train" / "default_custom_iv.json"
+PWL_CURVE = ROOT / "data" / "assets" / "experimental_curve_voff_0.8_200_points.npz"
 
 
 def test_builder_only_resolves_explicit_source_and_hashed_profiles() -> None:
@@ -49,6 +51,19 @@ def test_json_pointer_overrides_are_recorded_and_revalidated() -> None:
     assert config["provenance"]["generation_overrides"] == [
         {"pointer": "/training/epochs", "value": 1},
         {"pointer": "/equilibrium/sweeps", "value": 2},
+    ]
+
+
+def test_iv_curve_option_needs_only_a_path_and_records_the_change() -> None:
+    config = build_training_config(
+        PWL_SOURCE,
+        repo_root=ROOT,
+        iv_curve=PWL_CURVE,
+    )
+    relative = "data/assets/experimental_curve_voff_0.8_200_points.npz"
+    assert config["simulation"]["updater"]["curve"] == relative
+    assert config["provenance"]["generation_overrides"] == [
+        {"pointer": "/simulation/updater/curve", "value": relative}
     ]
 
 
@@ -146,3 +161,30 @@ def test_train_drn_cli_can_materialize_without_running(tmp_path: Path) -> None:
     payload = json.loads(destination.read_text())
     assert payload["training"]["epochs"] == 1
     assert payload["simulation"]["updater"]["method"] == "lambert_w_v1"
+
+
+def test_train_drn_cli_accepts_a_custom_curve_without_a_checksum(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "custom-iv.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "train_drn.py"),
+            "--config",
+            str(PWL_SOURCE),
+            "--iv-curve",
+            str(PWL_CURVE),
+            "--write-config",
+            str(destination),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "resolved_config:" in completed.stdout
+    payload = json.loads(destination.read_text())
+    assert payload["simulation"]["updater"]["curve"] == (
+        "data/assets/experimental_curve_voff_0.8_200_points.npz"
+    )

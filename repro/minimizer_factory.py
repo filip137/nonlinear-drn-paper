@@ -95,9 +95,9 @@ def simulation_assets(
         return {}
     curve = simulation["updater"]["curve"]
     path = _repo_file(curve, repo_root=repo_root)
-    # Resolution is the audit boundary: verify semantic NPZ contents as well as
-    # file bytes before any dataset or numerical model is constructed.
-    load_iv_data(path, expected_sha256=curve["sha256"])
+    # Validate semantic NPZ contents before any dataset or numerical model is
+    # constructed. Archived configs may also pin the bytes with a legacy hash.
+    load_iv_data(path, expected_sha256=_legacy_curve_sha256(curve))
     return {"iv_curve": path}
 
 
@@ -211,7 +211,7 @@ def _updater_values(
             "pwl_extrapolation": updater["extrapolation"],
             "pwl_nonconvergence_policy": updater["nonconvergence_policy"],
             "iv_data": load_iv_data(
-                curve_path, expected_sha256=curve["sha256"]
+                curve_path, expected_sha256=_legacy_curve_sha256(curve)
             ),
             "double_selector": "overrelaxed" if relaxed else "standard",
             "pwl_damping": updater["damping"],
@@ -224,13 +224,20 @@ def _updater_values(
     )
 
 
-def _repo_file(reference: Mapping[str, Any], *, repo_root: Path) -> Path:
+def _legacy_curve_sha256(curve: str | Mapping[str, Any]) -> str | None:
+    """Return the checksum carried only by legacy archived curve references."""
+
+    return None if isinstance(curve, str) else curve["sha256"]
+
+
+def _repo_file(reference: str | Mapping[str, Any], *, repo_root: Path) -> Path:
     root = repo_root.expanduser().resolve()
-    relative = Path(reference["path"])
+    configured_path = reference if isinstance(reference, str) else reference["path"]
+    relative = Path(configured_path)
     if relative.is_absolute():
         raise ValueError(
             "Expected a repository-relative scientific asset path. "
-            f"Provided value: {reference['path']!r}."
+            f"Provided value: {configured_path!r}."
         )
     path = (root / relative).resolve()
     try:
@@ -238,7 +245,7 @@ def _repo_file(reference: Mapping[str, Any], *, repo_root: Path) -> Path:
     except ValueError as exc:
         raise ValueError(
             "Expected a scientific asset path to resolve inside the repository. "
-            f"Provided value: {reference['path']!r}."
+            f"Provided value: {configured_path!r}."
         ) from exc
     if not path.is_file():
         raise FileNotFoundError(

@@ -8,7 +8,6 @@ import pytest
 from repro.strict_config import (
     ConfigurationReferenceError,
     ConfigurationValidationError,
-    file_sha256,
 )
 from repro.train import _build_mnist_transform, load_training_config
 
@@ -70,14 +69,14 @@ def test_partial_or_overlapping_composition_is_rejected(tmp_path: Path) -> None:
         load_training_config(candidate, repo_root=ROOT)
 
 
-def test_pwl_curve_is_an_exact_scientific_asset_reference() -> None:
+def test_pwl_curve_is_a_repository_relative_asset_path() -> None:
     config, _ = load_training_config(
         TRAIN_DIR / "digits_pwl.json",
         repo_root=ROOT,
     )
     curve = config.simulation["updater"]["curve"]
-    assert curve["path"] == "data/assets/experimental_curve_voff_0.8_200_points.npz"
-    assert curve["sha256"] == file_sha256(ROOT / curve["path"])
+    assert curve == "data/assets/experimental_curve_voff_0.8_200_points.npz"
+    assert (ROOT / curve).is_file()
     assert config.simulation["updater"]["extrapolation"] == "clamp"
 
 

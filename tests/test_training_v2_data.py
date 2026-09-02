@@ -85,15 +85,11 @@ def test_training_references_name_exact_file_bytes(name: str) -> None:
         assert reference["sha256"] == _sha256(target)
 
 
-def test_piecewise_linear_curve_reference_names_exact_asset_bytes() -> None:
+def test_piecewise_linear_curve_uses_a_repository_relative_path() -> None:
     profile = _load(SIMULATOR_DIR / "default_pwl.json")
-    reference = profile["simulation"]["updater"]["curve"]
-    target = ROOT / reference["path"]
-    assert reference == {
-        "path": "data/assets/experimental_curve_voff_0.8_200_points.npz",
-        "sha256": "3d7dd78182fc399fecdf1f6a99a3b9b71ffde131fd32e1bd62bde2689be136ea",
-    }
-    assert _sha256(target) == reference["sha256"]
+    curve = profile["simulation"]["updater"]["curve"]
+    assert curve == "data/assets/experimental_curve_voff_0.8_200_points.npz"
+    assert (ROOT / curve).is_file()
 
 
 EXPECTED_TRAINING = {
@@ -298,9 +294,12 @@ def test_training_v2_materializes_previously_implicit_policy(name: str) -> None:
             "tie_break": "first",
         },
     }
-    assert document["execution_ref"]["path"] == (
-        "configs/execution/reference_cpu.json"
+    expected_execution = (
+        "configs/execution/reference_cuda.json"
+        if name == "mnist_paper_double_shockley.json"
+        else "configs/execution/reference_cpu.json"
     )
+    assert document["execution_ref"]["path"] == expected_execution
 
     data = document["data"]
     assert data["seed"] == 0

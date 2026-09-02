@@ -246,10 +246,7 @@ def test_runtime_relational_checks_reject_bad_matrix_shape() -> None:
 
 def test_missing_pwl_curve_fails_before_science() -> None:
     document = _config("experimental")
-    document["simulation"]["updater"]["curve"] = {
-        "path": "missing.npz",
-        "sha256": "0" * 64,
-    }
+    document["simulation"]["updater"]["curve"] = "missing.npz"
     with pytest.raises(FileNotFoundError, match="configured scientific asset"):
         simulate_small_network(document, repo_root=ROOT)
 

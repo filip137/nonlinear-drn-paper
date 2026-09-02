@@ -74,6 +74,11 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     train.add_argument(
+        "--iv-curve",
+        type=Path,
+        help="Use a repository-local measured I-V .npz file.",
+    )
+    train.add_argument(
         "--download",
         action="store_true",
         help="Allow torchvision to download MNIST into data/external/.",
@@ -207,16 +212,14 @@ def main() -> int:
         print(f"accuracy: {100.0 * result.accuracy:.2f}%")
         return 0
     if args.command == "train":
-        from repro.train import run_training
+        from repro.runner import run_drn
 
-        config_path = args.config
-        if not config_path.is_absolute():
-            config_path = PACK_ROOT / config_path
-        result = run_training(
-            PACK_ROOT,
-            config_path,
+        result = run_drn(
+            args.config,
+            repo_root=PACK_ROOT,
             output_dir=args.output,
             overrides=args.override,
+            iv_curve=args.iv_curve,
             download=args.download,
         )
         print(f"training output: {result.output_dir}")

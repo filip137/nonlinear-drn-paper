@@ -24,8 +24,9 @@ The numerical choices that were previously hidden in code or process
 environment are now explicit: Lambert-W backend and work dtype, coefficient
 clamps, exponent clip, asymptotic threshold and term count, optional Newton
 polish, and PWL extrapolation/nonconvergence behavior. The measured curve
-itself is a path-and-SHA reference, so changing the asset without updating the
-profile fails closed.
+itself is a repository-relative NPZ path. Its contents are validated before
+the model is built and fingerprinted automatically in each run receipt; bundled
+curve bytes are also covered by the release checksum index.
 
 The deterministic migration records its tool/schema transition under
 `provenance.migration` and lists only the active formerly implicit fields under
@@ -34,9 +35,11 @@ profiles name their hidden Lambert-W safeguards, single Shockley additionally
 names `quadratic_coefficient_min`, and PWL names extrapolation and
 nonconvergence policy. Provenance is descriptive and is not runtime input.
 
-To make a variant, copy the relevant profile into `configs/local/`, edit only
-fields active for its family, and validate it. Then update a copied training
-source's `simulation_ref` with both the new repository-relative path and the
-SHA-256 of the exact profile bytes. Runtime aliases such as `custom`,
+To use another measured curve, pass its repository-local path with
+`scripts/train_drn.py --iv-curve`. For other simulator changes, copy the
+relevant profile into `configs/local/`, edit only fields active for its family,
+and validate it. Then update a copied training source's `simulation_ref` with
+both the new repository-relative path and the SHA-256 of the exact profile
+bytes. Runtime aliases such as `custom`,
 `overrelated`, and `overrelaxed` are not part of version 2; behavior is stated
 directly through `method`, `dtype`, and `relaxation`.

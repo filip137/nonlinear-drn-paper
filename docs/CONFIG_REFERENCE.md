@@ -10,7 +10,7 @@ simulation. The authoritative machine-readable schemas live in
 Version 2 has four invariants:
 
 1. Every scientific value has one owner.
-2. Referenced sources and assets are identified by path and exact SHA-256.
+2. Reusable configuration sources and archived replay assets pin exact bytes.
 3. Execution uses a fully expanded, revalidated snapshot.
 4. Runtime APIs do not invent numerical defaults or read scientific values
    from process environment.
@@ -45,7 +45,7 @@ claim the same top-level section.
 
 ## Path-and-hash references
 
-A configuration or scientific-asset reference is exactly:
+A reusable configuration reference is exactly:
 
 ```json
 {
@@ -60,10 +60,14 @@ before parsing it. A renamed, reformatted, or edited file therefore requires a
 new digest; a matching path alone is insufficient.
 
 Training sources have `simulation_ref` and `execution_ref`. A measured/PWL
-updater has `curve`, also a path-and-hash reference. The replay manifest hashes
-every base config, weight checkpoint, optional SPICE reference, and its
-execution profile. `data/checksums.sha256` is the separate, artifact-wide
-integrity index; checksums are not duplicated inside the manifest.
+updater instead stores `curve` as a repository-relative NPZ path, so local
+experiments do not require manual checksum maintenance. The runtime validates
+the curve and the run receipt fingerprints its bytes automatically. Legacy
+archived replay configs may retain their original path-and-hash curve object.
+The replay manifest hashes every base config, weight checkpoint, optional
+SPICE reference, and its execution profile. `data/checksums.sha256` is the
+separate, artifact-wide integrity index; checksums are not duplicated inside
+the manifest.
 
 ## Source, expanded snapshot, and receipt
 
@@ -385,7 +389,7 @@ The physical block is exactly:
 
 Its `piecewise_linear_newton_v1` updater contains:
 
-- a hashed `curve` reference;
+- a repository-relative NPZ `curve` path;
 - `extrapolation`, either `clamp` or `linear`;
 - `nonconvergence_policy`, either `accept_last` or `error`;
 - Newton `damping`, `max_steps`, and `voltage_tolerance`; and

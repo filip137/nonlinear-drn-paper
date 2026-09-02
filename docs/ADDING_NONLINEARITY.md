@@ -33,63 +33,46 @@ voltage = np.array([-1.0, -0.5, 0.0, 0.5, 1.0])
 current = np.array([-2.0e-3, -2.0e-4, 0.0, 2.0e-4, 2.0e-3])
 np.savez("configs/local/my_curve.npz", i=current, v=voltage)
 PY
-
-sha256sum configs/local/my_curve.npz
-cp configs/simulator/default_pwl.json configs/local/my_pwl.json
 ```
 
-Edit `configs/local/my_pwl.json` so
-`simulation.updater.curve` contains the path and printed digest:
+Use the curve directly with the editable measured/PWL training source:
 
-```json
-{
-  "path": "configs/local/my_curve.npz",
-  "sha256": "<exact digest printed above>"
-}
+```bash
+python scripts/train_drn.py \
+  --config configs/train/default_custom_iv.json \
+  --iv-curve configs/local/my_curve.npz
 ```
 
-The same updater block explicitly owns the range and numerical policy:
+That is the complete setup: no checksum calculation, simulator-profile copy,
+or nested reference edit is required. The CLI records the selected path as a
+generation override in the resolved configuration. It validates the NPZ before
+building the model, and the run receipt fingerprints the bytes that actually
+ran.
 
-```json
-{
-  "method": "piecewise_linear_newton_v1",
-  "curve": {
-    "path": "configs/local/my_curve.npz",
-    "sha256": "<exact curve digest>"
-  },
-  "extrapolation": "clamp",
-  "nonconvergence_policy": "accept_last",
-  "damping": 1.0,
-  "max_steps": 32,
-  "voltage_tolerance": 0.01,
-  "relaxation": 1.0
-}
+To inspect or keep the complete configuration without training, add
+`--write-config` and then run the resulting snapshot:
+
+```bash
+python scripts/train_drn.py \
+  --config configs/train/default_custom_iv.json \
+  --iv-curve configs/local/my_curve.npz \
+  --write-config configs/local/my_curve_training.json
+
+python scripts/train_drn.py \
+  --config configs/local/my_curve_training.json
 ```
 
+The starter's updater block explicitly owns the numerical policy.
 `extrapolation` accepts only `clamp` or `linear`. If Newton exhausts
 `max_steps`, `nonconvergence_policy: error` aborts the solve, while
 `accept_last` continues with the last finite iterate. Choose this explicitly
 for a new profile; `accept_last` above matches the bundled migrated profile.
 
-Hash the completed profile, copy a matching training source, and update its
-`simulation_ref`:
-
-```bash
-sha256sum configs/local/my_pwl.json
-cp configs/train/default_custom_iv.json configs/local/my_pwl_training.json
-# Put the my_pwl.json path and printed hash in simulation_ref, then resolve:
-python scripts/train_drn.py \
-  --config configs/local/my_pwl_training.json \
-  --write-config configs/local/my_pwl_training.resolved.json
-```
-
 On MNIST, start from `configs/train/default_mnist_custom_iv.json`. It is a
 Digits-derived starting point, not an audited paper-MNIST result.
 
-There is intentionally no separate curve CLI parameter or Python numerical
-argument. Selecting another curve changes the simulator profile and therefore
-its hash. The resolved snapshot embeds the verified curve reference, and the
-run receipt records the curve bytes again as an executed asset.
+The Python API exposes the same convenience through the `iv_curve` argument on
+`build_training_config`, `write_training_config`, and `run_drn`.
 
 The measured updater interpolates `I(v)` and solves the coordinate current
 balance
@@ -216,7 +199,8 @@ At minimum, add tests for:
   parameters;
 - strict schema behavior: missing, extra, inactive-family, alias, numeric-string,
   duplicate-key, and non-finite cases;
-- exact path-and-hash verification for referenced assets and profiles;
+- exact path-and-hash verification for referenced profiles, plus path
+  validation and automatic receipt fingerprinting for measured curves;
 - deterministic hostile-environment tests proving that process variables cannot
   change a resolved config's behavior;
 - one-batch training with finite equilibrium-propagation gradients;

@@ -34,9 +34,10 @@ configs/train/digits_pwl.json
 
 The six `default_*.json` files under `configs/train/` are editable-starting-point
 sources. Exact paper MNIST reproduction uses
-`configs/train/mnist_paper_double_shockley.json`. Only that double-Shockley
-MNIST source has audited paper parameters; the single-Shockley and PWL MNIST
-defaults adapt Digits settings and define new experiments.
+`configs/train/mnist_paper_double_shockley.json`, which references the
+deterministic CUDA profile. Only that double-Shockley MNIST source has audited
+paper parameters; the single-Shockley and PWL MNIST defaults adapt Digits
+settings and define new experiments.
 
 ## Inspect or generate without training
 
@@ -123,39 +124,18 @@ budget defines a new experiment; there is no depth-dependent hidden fallback.
 
 ## Deterministic CPU and CUDA profiles
 
-Every bundled training source contains a hashed `execution_ref`. The default
-checked sources use `configs/execution/reference_cpu.json`, which fixes one
-thread, zero loader workers, float32 model state, deterministic algorithms, and
-config-derived Python/NumPy/PyTorch seeds.
+Every bundled training source contains a hashed `execution_ref`. The editable
+defaults and Digits sources use `configs/execution/reference_cpu.json`, which
+fixes one thread, zero loader workers, float32 model state, deterministic
+algorithms, and config-derived Python/NumPy/PyTorch seeds. The audited paper
+MNIST source instead references `configs/execution/reference_cuda.json`.
 
-For CUDA, make a new source rather than passing a device flag:
-
-```bash
-mkdir -p configs/local
-cp configs/train/mnist_paper_double_shockley.json \
-  configs/local/mnist_paper_double_cuda.json
-sha256sum configs/execution/reference_cuda.json
-```
-
-In the copy, replace `execution_ref` with:
-
-```json
-{
-  "path": "configs/execution/reference_cuda.json",
-  "sha256": "e75ae3c2223163618a469ba8737ed3d2ccf162da6502a93832f72c856005cbb8"
-}
-```
-
-Verify that the printed digest matches before using the snippet. Then resolve
-and launch:
+After installing the CUDA requirements and verifying the device, launch it
+directly:
 
 ```bash
 python scripts/train_drn.py \
-  --config configs/local/mnist_paper_double_cuda.json \
-  --write-config configs/local/mnist_paper_double_cuda.resolved.json
-
-python scripts/train_drn.py \
-  --config configs/local/mnist_paper_double_cuda.resolved.json \
+  --config configs/train/mnist_paper_double_shockley.json \
   --download
 ```
 
@@ -219,15 +199,18 @@ stale hash is invalid rather than silently following changed defaults.
 
 ## Custom measured I–V data
 
-There is no standalone curve override. A curve is a hashed scientific asset
-owned by the measured/PWL simulator profile:
+Put the NPZ inside the repository and pass its path directly:
 
-1. put the NPZ inside the repository, for example
-   `configs/local/my_curve.npz`;
-2. copy `configs/simulator/default_pwl.json` into `configs/local/`;
-3. replace `simulation.updater.curve.path` and `.sha256`;
-4. hash the copied simulator profile; and
-5. update a copied training source's `simulation_ref`.
+```bash
+python scripts/train_drn.py \
+  --config configs/train/default_custom_iv.json \
+  --iv-curve configs/local/my_curve.npz
+```
+
+No SHA-256 value or copied simulator profile is required. The option is
+materialized as `/simulation/updater/curve` in the resolved snapshot, and the
+run receipt fingerprints the curve file automatically. Use
+`default_mnist_custom_iv.json` as the source for MNIST.
 
 The NPZ may contain equal-length 1-D `i` and `v`, or `(2, N)` `iv` in
 current-then-voltage order. Samples must be real and finite; voltage must be
@@ -266,13 +249,19 @@ snapshot = write_training_config(
 result = run_drn(snapshot)
 print(result.output_dir)
 print(result.receipt_path)
+
+custom = build_training_config(
+    "configs/train/default_custom_iv.json",
+    iv_curve="configs/local/my_curve.npz",
+)
 ```
 
 `build_training_config` returns the expanded mapping without writing.
 `write_training_config` writes one complete mapping and returns its path.
-`run_drn` accepts a config path and has only operational destination/download
-arguments plus the same recorded override mechanism. It has no granular
-numerical parameters.
+`run_drn` accepts a config path and has operational destination/download
+arguments plus the same recorded override mechanism. All three functions also
+accept `iv_curve` as the path-only convenience for measured data; it is
+recorded as an override rather than becoming an implicit runtime setting.
 
 ## Output contract
 

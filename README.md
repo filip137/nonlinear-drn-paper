@@ -113,38 +113,38 @@ strings need JSON quotes. Targets must already exist, and duplicate,
 overlapping, unknown, or schema-invalid changes are rejected. The generated
 snapshot records every change under `provenance.generation_overrides`.
 
-### MNIST and CUDA
+### MNIST on CUDA
 
-The exact reported DRN-XS training source is
-`configs/train/mnist_paper_double_shockley.json`. The checked source references
-the portable CPU profile. For a CUDA run, copy it under `configs/local/` and
-replace `execution_ref` with the path and digest of
-`configs/execution/reference_cuda.json` (verify it with `sha256sum`). The
-[training guide](docs/TRAINING_RUNNER.md#deterministic-cpu-and-cuda-profiles)
-gives the complete source-edit and resolve workflow. Then run:
+Run the [audited DRN-XS configuration](configs/train/mnist_paper_double_shockley.json),
+which already references the deterministic CUDA profile:
 
 ```bash
 python scripts/train_drn.py \
-  --config configs/local/mnist_paper_double_cuda.json \
+  --config configs/train/mnist_paper_double_shockley.json \
   --download
 ```
 
-There is no scientific `--device`, `--epochs`, `--seed`, or learning-rate flag.
-Those values belong in the source or an explicitly generated snapshot. The
-`--download` switch is operational permission to fetch MNIST into the configured
-data path; it does not alter the scientific config.
+The config fixes the dataset, architecture, training protocol, solver, and CUDA
+execution settings. `--download` only permits torchvision to fetch MNIST.
 
-Only double Shockley has audited MNIST paper settings. The bundled MNIST
-single-Shockley and measured/PWL files are Digits-derived starting points for
-new experiments. See [MNIST reproduction notes](docs/MNIST_REPRODUCTION.md)
-for the reported aggregate and original-seed limitation.
+This is the only audited MNIST paper configuration. See the
+[MNIST reproduction notes](docs/MNIST_REPRODUCTION.md) for the reported
+aggregate and original-seed limitation.
 
 ## Use a custom measured I–V curve
 
-To use measured device data, start from
-`configs/simulator/default_pwl.json` and reference the NPZ curve by its path and
-SHA-256. See [Adding a nonlinearity](docs/ADDING_NONLINEARITY.md) for the
-accepted array formats and complete workflow.
+Put the NPZ file inside the repository and pass its path directly—no checksum
+or simulator-profile copy is needed:
+
+```bash
+python scripts/train_drn.py \
+  --config configs/train/default_custom_iv.json \
+  --iv-curve configs/local/my_curve.npz
+```
+
+Use `default_mnist_custom_iv.json` instead for MNIST. See
+[Adding a nonlinearity](docs/ADDING_NONLINEARITY.md) for the accepted array
+formats and numerical-policy details.
 
 ## Reproduce the scientific results
 

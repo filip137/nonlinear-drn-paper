@@ -89,36 +89,12 @@ explicitly if PyTorch, the NVIDIA driver, or the device is incompatible.
 
 The checked scientific source is
 `configs/train/mnist_paper_double_shockley.json`. It contains every audited
-data/model/training/equilibrium value and references the portable CPU execution
-profile. To run on CUDA, create a new source whose `execution_ref` names the
-hashed deterministic CUDA profile:
-
-```bash
-mkdir -p configs/local
-cp configs/train/mnist_paper_double_shockley.json \
-  configs/local/mnist_paper_double_cuda.json
-sha256sum configs/execution/reference_cuda.json
-```
-
-Replace `execution_ref` in the copy with:
-
-```json
-{
-  "path": "configs/execution/reference_cuda.json",
-  "sha256": "e75ae3c2223163618a469ba8737ed3d2ccf162da6502a93832f72c856005cbb8"
-}
-```
-
-Confirm that the printed digest matches, resolve the source, then run the
-immutable snapshot:
+data/model/training/equilibrium value and already references the hashed
+deterministic CUDA profile. Run it directly:
 
 ```bash
 python scripts/train_drn.py \
-  --config configs/local/mnist_paper_double_cuda.json \
-  --write-config configs/local/mnist_paper_double_cuda.resolved.json
-
-python scripts/train_drn.py \
-  --config configs/local/mnist_paper_double_cuda.resolved.json \
+  --config configs/train/mnist_paper_double_shockley.json \
   --download
 ```
 
@@ -129,7 +105,7 @@ existing value explicitly and write a distinct snapshot:
 
 ```bash
 python scripts/train_drn.py \
-  --config configs/local/mnist_paper_double_cuda.json \
+  --config configs/train/mnist_paper_double_shockley.json \
   --override '/data/seed=1' \
   --write-config configs/local/mnist_paper_double_cuda_seed1.json
 ```

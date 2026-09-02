@@ -7,15 +7,16 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "repositoryRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
     "configReference": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "path": {
-          "type": "string",
-          "minLength": 1,
-          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
-        },
+        "path": {"$ref": "#/$defs/repositoryRelativePath"},
         "sha256": {"$ref": "#/$defs/sha256"}
       },
       "required": ["path", "sha256"]
@@ -201,7 +202,13 @@
       "additionalProperties": false,
       "properties": {
         "method": {"const": "piecewise_linear_newton_v1"},
-        "curve": {"$ref": "#/$defs/configReference"},
+        "curve": {
+          "description": "Repository-relative NPZ path. Legacy archived configurations may retain a path-and-SHA object.",
+          "oneOf": [
+            {"$ref": "#/$defs/repositoryRelativePath"},
+            {"$ref": "#/$defs/configReference"}
+          ]
+        },
         "extrapolation": {"enum": ["clamp", "linear"]},
         "nonconvergence_policy": {"enum": ["accept_last", "error"]},
         "damping": {"type": "number", "exclusiveMinimum": 0},

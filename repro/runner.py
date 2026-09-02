@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -16,6 +17,7 @@ def build_training_config(
     *,
     repo_root: Path | None = None,
     overrides: Sequence[str] = (),
+    iv_curve: str | Path | None = None,
 ) -> dict[str, Any]:
     """Return a fully expanded v2 snapshot with no implicit experiment policy."""
 
@@ -26,7 +28,7 @@ def build_training_config(
     return resolve_training_config(
         source,
         repo_root=root,
-        overrides=overrides,
+        overrides=_with_iv_curve_override(overrides, iv_curve, repo_root=root),
     ).document
 
 
@@ -36,6 +38,7 @@ def write_training_config(
     *,
     repo_root: Path | None = None,
     overrides: Sequence[str] = (),
+    iv_curve: str | Path | None = None,
 ) -> Path:
     """Materialize a complete executable config before numerical work."""
 
@@ -44,6 +47,7 @@ def write_training_config(
         source,
         repo_root=root,
         overrides=overrides,
+        iv_curve=iv_curve,
     )
     path = Path(destination).expanduser()
     if not path.is_absolute():
@@ -60,6 +64,7 @@ def run_drn(
     repo_root: Path | None = None,
     output_dir: str | Path | None = None,
     overrides: Sequence[str] = (),
+    iv_curve: str | Path | None = None,
     download: bool = False,
 ):
     """Train from one source/snapshot; all scientific edits are recorded overrides."""
@@ -73,7 +78,7 @@ def run_drn(
         root,
         Path(config),
         output_dir=output,
-        overrides=overrides,
+        overrides=_with_iv_curve_override(overrides, iv_curve, repo_root=root),
         download=download,
     )
 
@@ -96,6 +101,14 @@ def main(
         metavar="JSON_POINTER=JSON_VALUE",
     )
     parser.add_argument(
+        "--iv-curve",
+        type=Path,
+        help=(
+            "Use a repository-local measured I-V .npz file and record the path "
+            "in the resolved configuration."
+        ),
+    )
+    parser.add_argument(
         "--write-config",
         type=Path,
         help="Resolve and write the complete snapshot without training.",
@@ -109,6 +122,7 @@ def main(
             args.write_config,
             repo_root=root,
             overrides=args.override,
+            iv_curve=args.iv_curve,
         )
         print(f"resolved_config: {path}")
         return 0
@@ -117,6 +131,7 @@ def main(
         repo_root=root,
         output_dir=args.output,
         overrides=args.override,
+        iv_curve=args.iv_curve,
         download=args.download,
     )
     print(f"training_output: {result.output_dir}")
@@ -133,6 +148,37 @@ def _ensure_vendor_path(root: Path) -> None:
     vendor = str(root / "repro" / "vendor")
     if vendor not in sys.path:
         sys.path.insert(0, vendor)
+
+
+def _with_iv_curve_override(
+    overrides: Sequence[str],
+    iv_curve: str | Path | None,
+    *,
+    repo_root: Path,
+) -> tuple[str, ...]:
+    values = tuple(overrides)
+    if iv_curve is None:
+        return values
+
+    candidate = Path(iv_curve).expanduser()
+    if not candidate.is_absolute():
+        candidate = repo_root / candidate
+    candidate = candidate.resolve()
+    try:
+        relative = candidate.relative_to(repo_root.resolve()).as_posix()
+    except ValueError as exc:
+        raise ValueError(
+            "Expected --iv-curve to name a file inside the repository. "
+            f"Provided value: {iv_curve!s}."
+        ) from exc
+    if not candidate.is_file():
+        raise FileNotFoundError(
+            "Expected --iv-curve to name an existing .npz file. "
+            f"Provided value: {candidate}."
+        )
+
+    encoded = json.dumps(relative, ensure_ascii=False)
+    return (*values, f"/simulation/updater/curve={encoded}")
 
 
 __all__ = [

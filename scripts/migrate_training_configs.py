@@ -146,6 +146,15 @@ TRAINING_SIMULATOR = {
     ),
 }
 
+TRAINING_EXECUTION = {
+    name: (
+        "configs/execution/reference_cuda.json"
+        if name == "mnist_paper_double_shockley.json"
+        else "configs/execution/reference_cpu.json"
+    )
+    for name in TRAINING_FILES
+}
+
 
 def _read_json(path: Path) -> dict[str, Any]:
     value = load_json(path)
@@ -187,8 +196,8 @@ def _provenance(legacy: dict[str, Any]) -> dict[str, Any]:
             "iv_data_path or pass --iv-data-path for a new curve."
         ):
             source = (
-                "Derived from the validated Digits measured/PWL anchor; select a "
-                "different hashed simulator profile to use another curve."
+                "Derived from the validated Digits measured/PWL anchor; pass "
+                "--iv-curve to use another repository-local curve."
             )
         result["source"] = source
     expected = legacy.get("expected_results")
@@ -246,7 +255,11 @@ def _migrate_simulator(root: Path, path: Path) -> dict[str, Any]:
     legacy = _read_json(path)
     if legacy.get("schema_version") == 2:
         if legacy["simulation"]["nonlinearity"] == "experimental":
-            legacy["simulation"]["updater"]["nonconvergence_policy"] = "accept_last"
+            updater = legacy["simulation"]["updater"]
+            updater["nonconvergence_policy"] = "accept_last"
+            curve = updater["curve"]
+            if isinstance(curve, dict):
+                updater["curve"] = curve["path"]
         defaults = _simulator_materialized_defaults(
             legacy["simulation"]["nonlinearity"]
         )
@@ -266,7 +279,7 @@ def _migrate_simulator(root: Path, path: Path) -> dict[str, Any]:
             "nonlinearity": family,
             "physical": {"representation": "measured_piecewise_linear"},
             "updater": {
-                "curve": _reference(root, curve_path),
+                "curve": curve_path,
                 "damping": legacy["damping"],
                 "extrapolation": "clamp",
                 "max_steps": legacy["experimental_newton_max_steps"],
@@ -561,10 +574,13 @@ def migrate(root: Path) -> None:
     root = root.expanduser().resolve()
     simulator_dir = root / "configs" / "simulator"
     training_dir = root / "configs" / "train"
-    execution_path = root / "configs" / "execution" / "reference_cpu.json"
 
-    load_validated_json(execution_path, EXECUTION_SCHEMA, repo_root=root)
-    execution_ref = _reference(root, "configs/execution/reference_cpu.json")
+    for execution_profile in sorted(set(TRAINING_EXECUTION.values())):
+        load_validated_json(
+            root / execution_profile,
+            EXECUTION_SCHEMA,
+            repo_root=root,
+        )
 
     for name in SIMULATOR_FILES:
         path = simulator_dir / name
@@ -574,6 +590,7 @@ def migrate(root: Path) -> None:
         path = training_dir / name
         simulation_path = TRAINING_SIMULATOR[name]
         simulation_ref = _reference(root, simulation_path)
+        execution_ref = _reference(root, TRAINING_EXECUTION[name])
         _write_json(
             path,
             _migrate_training(

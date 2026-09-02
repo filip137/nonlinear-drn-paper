@@ -45,6 +45,9 @@ that expanded snapshot.
 | `digits_pwl.json` | Digits | 32 | 32 | 15 | paper measured/PWL |
 | `mnist_paper_double_shockley.json` | MNIST | 100 | 16 | 100 | paper DRN-XS |
 
+The paper MNIST source references the deterministic CUDA execution profile;
+the other bundled sources reference the portable CPU profile.
+
 The four paper sources now use the same reference mechanism as the editable
 defaults; simulator values are no longer copied inline. The paper MNIST outcome
 summary remains under `provenance.expected_results` and is never read by the
@@ -62,6 +65,8 @@ If a simulator setting changes, copy the simulator profile too and update both
 `simulation_ref.path` and `simulation_ref.sha256`. If the execution policy
 changes, create or select a versioned execution profile and update both fields
 of `execution_ref`. A path without its matching hash is deliberately invalid.
+Measured curves are the simpler exception: use `--iv-curve` with a
+repository-local NPZ path, and the generated snapshot records the change.
 
 The migration used for the bundled records is reproducible and idempotent:
 

@@ -133,12 +133,12 @@
       "to_schema_version": 2,
       "tool": "scripts/migrate_training_configs.py"
     },
-    "source": "Derived from the validated Digits measured/PWL anchor; select a different hashed simulator profile to use another curve."
+    "source": "Derived from the validated Digits measured/PWL anchor; pass --iv-curve to use another repository-local curve."
   },
   "schema_version": 2,
   "simulation_ref": {
     "path": "configs/simulator/default_pwl.json",
-    "sha256": "c4cf1d5a67a51fbc10e4a9527692b7dada9073622d043e0af2768e5f88372612"
+    "sha256": "68f2c8381ac85e4b340007d3005b53c8a1b91e54047ff1ecf1140f24e222a71b"
   },
   "training": {
     "batch_limits": {

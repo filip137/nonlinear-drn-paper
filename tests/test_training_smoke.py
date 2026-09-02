@@ -55,6 +55,12 @@ def test_one_batch_training_is_finite(
     sources = {item["owner"]: item for item in receipt["source_documents"]}
     assert set(sources) == {"training", "simulation", "execution"}
     assert all(len(item["sha256"]) == 64 for item in sources.values())
+    if config_name in {"digits_pwl.json", "default_custom_iv.json"}:
+        curve = receipt["assets"]["iv_curve"]
+        assert curve["path"] == (
+            "data/assets/experimental_curve_voff_0.8_200_points.npz"
+        )
+        assert len(curve["sha256"]) == 64
     output = capsys.readouterr().out
     assert "train epoch=1/1 batch=1/1" in output
     assert "eval epoch=1/1 batch=1/1" in output

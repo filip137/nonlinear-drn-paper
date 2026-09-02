@@ -107,10 +107,11 @@ Every accepted change is stored in `provenance.generation_overrides`. See the
 profiles, hashing, and Python APIs.
 
 A custom measured/PWL curve is a new experiment. It must live inside the
-repository and be referenced by path and SHA-256 from a copied PWL simulator
-profile. The profile itself is then referenced by path and SHA-256 from a
-copied training source. There is no environment or one-run curve override.
-Accepted NPZ layouts and the complete procedure are documented in
+repository and can be selected directly with `--iv-curve`; no manual checksum
+or copied simulator profile is required. The resolved configuration records
+the path and its generation override, while the run receipt fingerprints the
+executed curve automatically. Accepted NPZ layouts and the complete procedure
+are documented in
 [Adding a nonlinearity](ADDING_NONLINEARITY.md).
 
 ## MNIST protocol summary

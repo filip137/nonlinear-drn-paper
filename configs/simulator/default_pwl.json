@@ -24,10 +24,7 @@
       "representation": "measured_piecewise_linear"
     },
     "updater": {
-      "curve": {
-        "path": "data/assets/experimental_curve_voff_0.8_200_points.npz",
-        "sha256": "3d7dd78182fc399fecdf1f6a99a3b9b71ffde131fd32e1bd62bde2689be136ea"
-      },
+      "curve": "data/assets/experimental_curve_voff_0.8_200_points.npz",
       "damping": 1.0,
       "extrapolation": "clamp",
       "max_steps": 32,

@@ -26,8 +26,8 @@
     "update_order": "asynchronous"
   },
   "execution_ref": {
-    "path": "configs/execution/reference_cpu.json",
-    "sha256": "59a17593f198295732c9c675b6437f7536abc4bff7a08705e01dda7162459bc1"
+    "path": "configs/execution/reference_cuda.json",
+    "sha256": "e75ae3c2223163618a469ba8737ed3d2ccf162da6502a93832f72c856005cbb8"
   },
   "kind": "training",
   "model": {
