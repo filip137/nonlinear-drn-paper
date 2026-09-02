@@ -30,8 +30,7 @@ access. MNIST is downloaded only when `--download` is explicitly supplied.
 
 ## Clone and install
 
-Use Python 3.12 to reproduce the paper's reference numerical results. Python
-3.13 is also supported but may produce small numerical differences.
+Use Python 3.12 to reproduce the paper's reference numerical results.
 
 First, clone the repository and create a local virtual environment:
 
@@ -60,7 +59,7 @@ python scripts/reproduce.py verify --device cuda
 ```
 
 `verify` checks the installed scientific packages and the integrity of the
-bundled inputs. It does not download a dataset or start training. With
+bundled inputs. With
 `--device cuda`, it also checks that PyTorch can initialize CUDA. CUDA runs
 fail explicitly instead of silently falling back to CPU.
 
@@ -72,7 +71,7 @@ for Python 3.13.
 
 Use `simulate_small_network` to simulate a toy network defined directly in
 JSON. The user provides the conductance matrices, input voltages, and diode
-parameters; no training or model checkpoint is involved. Start from the bundled
+parameters; no training is done and the function simply sweeps through the input voltages. Start from the
 editable example and run:
 
 ```bash
