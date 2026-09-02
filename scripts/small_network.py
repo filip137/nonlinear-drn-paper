@@ -113,7 +113,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"converged: {result.converged}")
     print(f"sweeps: {result.sweeps}")
     print(f"final_max_voltage_change: {result.final_max_voltage_change:.9g}")
-    print(f"config_sha256: {result.receipt['resolved_config_sha256']}")
     return 0
 
 

@@ -274,7 +274,6 @@ def test_example_script_default_is_read_only(tmp_path: Path) -> None:
     )
     assert "input_voltage_sets: 3" in completed.stdout
     assert "converged: True" in completed.stdout
-    assert "config_sha256:" in completed.stdout
     assert list(tmp_path.iterdir()) == []
 
 
