@@ -596,18 +596,16 @@ class ExponentialExactDoubleDiodeUpdater(QuadraticUpdater):
         return v.to(out_dtype)
 
 class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
-    """
-    Quadratic updater for the double diode non-linearity where the current through diode is
-    an exponential function of its voltage.
+    """Coordinate minimizer for the manuscript's piecewise exponential law.
+
+    For v != 0, i(v) = sign(v) I_s exp((abs(v) - V_off) / V_t).
+    At zero, the primitive has subgradient [-c, c], with
+    c = I_s exp(-V_off / V_t); the minimizer is zero when abs(b) <= c.
     """
 
-    def __init__(
-        self,
-        layer,
-        fn,
-        diode_params,
-        settings: MinimizerSettings,
-    ):
+    _work_dtype = torch.float64
+
+    def __init__(self, layer, fn, diode_params, settings: MinimizerSettings):
         super().__init__(layer, fn)
         self._Is = diode_params["I_s"]
         self._Vt = diode_params["V_t"]
@@ -620,121 +618,84 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
         b = self._b()
         a = self._a().expand_as(b)
         if isinstance(self._layer, NonlinearResistiveLayer):
-            v = self.lambert_hidden(a, b, self._Is, self._v_off, self._Vt)
-            return v
-        else:
-            return -b / (2.0 * a)
+            return self.lambert_hidden(
+                a, b, self._Is, self._v_off, self._Vt,
+                z_thresh=self._settings.z_thresh,
+                polish=self._settings.use_polish,
+                exp_clip=self._settings.exp_clip,
+                max_inner_iter=self._settings.max_newton_iters,
+            )
+        return -b / (2.0 * a)
 
-
-
-        # asymptotic expansion for large z
     def lambertw_large(self, z, terms):
-            L1 = torch.log(z)
-            L2 = torch.log(L1)
-            w = L1 - L2
-            if terms >= 2:
-                w += L2 / L1
-            if terms >= 3:
-                w += (L2 * (-2 + L2)) / (2 * L1**2)
-            if terms >= 4:
-                w += (L2 * (6 - 9*L2 + 2*L2**2)) / (6 * L1**3)
-            return w
+        L1 = torch.log(z)
+        L2 = torch.log(L1)
+        w = L1 - L2
+        if terms >= 2:
+            w += L2 / L1
+        if terms >= 3:
+            w += (L2 * (-2 + L2)) / (2 * L1**2)
+        if terms >= 4:
+            w += (L2 * (6 - 9 * L2 + 2 * L2**2)) / (6 * L1**3)
+        return w
 
-    def lambert_hidden(self, a, b, I_s, v_off, vt,
-                       z_thresh=1e10, polish=True, exp_clip=10000.0):
-        """
-        Robust Lambert solver for the piecewise exponential diode equation.
-        All computations are done in float64, result cast back to input dtype.
-        """
-
-        # remember original dtype (likely float32)
+    def lambert_hidden(self, a, b, I_s, v_off, vt, z_thresh, polish, exp_clip, max_inner_iter):
         out_dtype = a.dtype
-        device = a.device
+        work_dtype = self._work_dtype
+        a_work = a.to(work_dtype)
+        b_work = b.to(work_dtype)
+        if self._b_clip is not None:
+            b_work = b_work.clamp(min=-self._b_clip, max=self._b_clip)
+        Is = torch.as_tensor(I_s, dtype=work_dtype, device=a.device)
+        vt = torch.as_tensor(vt, dtype=work_dtype, device=a.device)
+        v_off = torch.as_tensor(v_off, dtype=work_dtype, device=a.device)
+        context = type(self).__name__
 
-        # promote to float64 for stable computation
-        a_pre =  a
-        b_pre = b
-        a64     = a_pre.to(torch.float64)
-        b64     = b_pre.to(torch.float64)
-        if getattr(self, "_b_clip", None) is not None:
-            b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
-        I_s64   = torch.as_tensor(I_s,   dtype=torch.float64, device=device)
-        vt64    = torch.as_tensor(vt,    dtype=torch.float64, device=device)
-        v_off64 = torch.as_tensor(v_off, dtype=torch.float64, device=device)
+        # By symmetry, solve for the nonnegative magnitude t = abs(v):
+        # 2 a t - abs(b) + I_s exp((t - V_off) / V_t) = 0.
+        # There is no branch-dependent +/- I_s constant in this law.
+        drive = b_work.abs()
+        active = drive > Is * torch.exp(-v_off / vt)
+        A = drive / (2.0 * a_work)
+        exp_arg = ((A - v_off) / vt).clamp(min=-exp_clip, max=exp_clip)
+        z = (Is / (2.0 * a_work * vt)) * torch.exp(exp_arg)
+        # The zero branch requires neither Lambert W nor Newton refinement.
+        z = torch.where(active, z, 0.0)
+        _require_finite_tensor(z, context=f"{context} Lambert-W argument")
 
-        # shift A
-        A = torch.where(b64 <= 0, (b64 - I_s64) / (2.0 * a64),
-                                   (b64 + I_s64) / (2.0 * a64))
-
-        # Lambert arguments (clamp exponent to avoid overflow)
-        exp_arg_add = (-(A + v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-        exp_arg_rev = ((A - v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-        z_add = (I_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg_add)  # b <= 0
-        z_rev = (I_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg_rev)  # b > 0
-        z = torch.where(b64 > 0, z_rev, z_add)
-
-        # decide branch on raw z
-        use_asym   = z > z_thresh
-        small_mask = ~use_asym
-        W0 = torch.empty_like(z, dtype=torch.float64, device=z.device)
-
-        # --- direct path (small/medium z) ---
+        use_asym = active & (z > z_thresh)
+        small_mask = active & ~use_asym
+        W0 = torch.zeros_like(z)
         if small_mask.any():
-            z_small = torch.clamp(z[small_mask].to(torch.float64), max=float(z_thresh))
-
-            W0_small = self._lambertw(z_small).real.to(W0.dtype)          # float64
-
-            W0[small_mask] = W0_small                                       # dtype match
-
-        # --- asymptotic path (large z) ---
+            z_small = z[small_mask].to(torch.float64)
+            W0[small_mask] = self._lambertw(z_small).real.to(work_dtype)
         if use_asym.any():
-            z_large  = torch.clamp(z[use_asym].to(torch.float64), min=1.0)  # avoid log(log(z<1))
-            W0_large = self.lambertw_large(
-                z_large,
-                terms=self._settings.lambertw_asymptotic_terms,
-            ).to(torch.float64)
-            W0[use_asym] = W0_large
+            z_large = z[use_asym].to(torch.float64).clamp(min=1.0)
+            W0[use_asym] = self.lambertw_large(
+                z_large, terms=self._settings.lambertw_asymptotic_terms,
+            ).to(work_dtype)
+        _require_finite_tensor(W0, context=f"{context} Lambert-W value")
 
-    # back-substitute (vt64, A are already float64)
-        x = torch.where(b64 > 0, vt64 * W0 - A, -vt64 * W0 - A)
-        if torch.isnan(x).any():
-            print("NaNs detected; continuing")
-
-
-
-        # optional Newton polish
-        if polish:
-            max_inner_iter = 64
-            current_tol = 1e-7 * x.shape[0]
-            f = torch.zeros_like(x)
-            df = torch.zeros_like(x)
-            for k in range(1, max_inner_iter):
-                mask_pos = b64 <= 0
-                mask_neg = ~mask_pos
-
-                if mask_pos.any():
-                    xp = x[mask_pos]; ap64 = a64[mask_pos]; bp64 = b64[mask_pos]
-                    ep_arg = ((xp - v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-                    ep = torch.exp(ep_arg)
-                    f[mask_pos]  = 2*ap64*xp + (bp64 - I_s) + I_s*ep
-                    df[mask_pos] = 2*ap64 + (I_s/vt)*ep
-
-                if mask_neg.any():
-                    xn = x[mask_neg]; an64 = a64[mask_neg]; bn64 = b64[mask_neg]
-                    en_arg = ((-xn - v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-                    en = torch.exp(en_arg)
-                    f[mask_neg]  = 2*an64*xn + (bn64 + I_s) - I_s*en
-                    df[mask_neg] = 2*an64 + (I_s/vt)*en
-
-
-                x = x - f/df
-                if torch.norm(f) < current_tol:
+        magnitude = torch.where(active, (A - vt * W0).clamp(min=0.0), 0.0)
+        _require_finite_tensor(magnitude, context=f"{context} initial voltage")
+        if polish and active.any():
+            current_tol = self._settings.double_diode_polish_residual_tol * b_work.shape[0]
+            t = magnitude[active]
+            a_active = a_work[active]
+            drive_active = drive[active]
+            for _ in range(max_inner_iter):
+                exp_arg = ((t - v_off) / vt).clamp(min=-exp_clip, max=exp_clip)
+                current = Is * torch.exp(exp_arg)
+                residual = 2.0 * a_active * t - drive_active + current
+                derivative = 2.0 * a_active + current / vt
+                _require_finite_tensor(residual, context=f"{context} Newton residual")
+                _require_finite_tensor(derivative, context=f"{context} Newton derivative")
+                t = (t - residual / derivative).clamp(min=0.0)
+                _require_finite_tensor(t, context=f"{context} polished voltage")
+                if torch.norm(residual) < current_tol:
                     break
-
-        # cast back to original dtype (float32)
-        x_post = x
-        return x_post.to(out_dtype)
-
+            magnitude[active] = t
+        return (-torch.sign(b_work) * magnitude).to(out_dtype)
 
 
 class ExponentialSingleDiodeUpdater(QuadraticUpdater):
@@ -847,154 +808,127 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
     def _lambertw0(self, z):
         return self._lambertw(z).real
 
-    # ---------- Forward diode ----------
-    # 2 a v + b + I_s (exp((v - v_off)/vT) - 1) = 0
+    def _lambertw_from_log(self, log_z, z_thresh):
+        """Evaluate W0(exp(log_z)) without overflowing or losing FP64 accuracy.
+
+        The configured backend is used only within its FP32 exponent range:
+        torchlambertw currently casts even FP64 arguments to FP32. Refine its
+        result and the asymptotic seed in the logarithmic equation, in FP64.
+        These iterations evaluate W; they are not optional voltage polishing.
+        """
+        _require_finite_tensor(log_z, context="Single-Shockley log Lambert-W argument")
+        tiny = log_z < math.log(torch.finfo(torch.float64).eps)
+        log_threshold = min(math.log(z_thresh), math.log(torch.finfo(torch.float32).max) - 2.0)
+        large = log_z > log_threshold
+        regular = ~tiny & ~large
+        w = torch.empty_like(log_z)
+        # Here W(z)=z to FP64 relative precision, including underflow to zero.
+        w[tiny] = torch.exp(log_z[tiny])
+        if regular.any():
+            w[regular] = self._lambertw0(torch.exp(log_z[regular])).to(torch.float64)
+        if large.any():
+            l1 = log_z[large]
+            # Near z=1 the asymptotic series is unsuitable; start from W≈1.
+            seed = torch.ones_like(l1)
+            asym = l1 >= 8.0
+            l = l1[asym]
+            l2 = torch.log(l)
+            value = l - l2
+            terms = self._settings.lambertw_asymptotic_terms
+            if terms >= 2:
+                value = value + l2 / l
+            if terms >= 3:
+                value = value + l2 * (l2 - 2.0) / (2.0 * l.square())
+            if terms >= 4:
+                value = value + l2 * (6.0 - 9.0*l2 + 2.0*l2.square()) / (6.0*l.pow(3))
+            seed[asym] = value
+            w[large] = seed
+        active = ~tiny
+        value = w[active]
+        _require_finite_tensor(value, context="Single-Shockley Lambert-W seed")
+        if (value <= 0).any():
+            raise NonFiniteDiodeError("Single-Shockley Lambert-W seed must be positive.")
+        for _ in range(5):
+            value = value - (value + torch.log(value) - log_z[active]) * (value / (value + 1.0))
+        w[active] = value
+        return _require_finite_tensor(w, context="Single-Shockley Lambert-W value")
+
+    def _lambert_single_oriented(
+        self, a, b, I_s, v_off, vT, *, sign, z_thresh, polish,
+        abs_tol, rel_tol, a_min, max_inner_iter,
+    ):
+        """Solve the full Shockley coordinate equation in u=sign*v."""
+        out_dtype, device = a.dtype, a.device
+        diagonal = 2.0 * a.to(torch.float64).clamp_min(a_min)
+        b_work = b.to(torch.float64)
+        if self._b_clip is not None:
+            b_work = b_work.clamp(-self._b_clip, self._b_clip)
+        diagonal, b_work = torch.broadcast_tensors(diagonal, b_work)
+        _require_finite_tensor(diagonal, context="Single-Shockley diagonal")
+        _require_finite_tensor(b_work, context="Single-Shockley linear coefficient")
+        if I_s == 0:
+            result = -b_work / diagonal
+            return _require_finite_tensor(result.to(out_dtype), context="Single-Shockley linear voltage")
+        Is = torch.as_tensor(I_s, dtype=torch.float64, device=device)
+        vt = torch.as_tensor(vT, dtype=torch.float64, device=device)
+        off = torch.as_tensor(v_off, dtype=torch.float64, device=device)
+        oriented_b = sign * b_work
+        linear = (Is - oriented_b) / diagonal
+        log_prefactor = torch.log(Is) - torch.log(diagonal) - torch.log(vt)
+        log_z = log_prefactor + (linear - off) / vt
+        w = self._lambertw_from_log(log_z, z_thresh)
+        u = linear - vt * w
+        # Equivalent reconstruction prevents subtraction of nearly equal,
+        # enormous voltages when the finite diode voltage is close to off.
+        conducting = log_z > 0.0
+        u[conducting] = off + vt * (torch.log(w[conducting]) - log_prefactor[conducting])
+        _require_finite_tensor(u, context="Single-Shockley coordinate voltage")
+
+        if polish:
+            for _ in range(max_inner_iter):
+                # Scale residual and derivative by the same positive factor.
+                # No exponential clipping or change to the diode law is needed.
+                log_current = torch.log(Is) + (u - off) / vt
+                log_scale = log_current.clamp_min(0.0)
+                inverse_scale = torch.exp(-log_scale)
+                current_scaled = torch.exp(log_current - log_scale)
+                residual = (diagonal*u + oriented_b - Is)*inverse_scale + current_scaled
+                derivative = diagonal*inverse_scale + current_scaled/vt
+                _require_finite_tensor(residual, context="Single-Shockley scaled residual")
+                _require_finite_tensor(derivative, context="Single-Shockley scaled derivative")
+                u = u - residual / derivative
+                _require_finite_tensor(u, context="Single-Shockley polished voltage")
+                log_abs_f = (torch.log(residual.abs()) + log_scale).amax()
+                magnitude = (diagonal*u.abs() + b_work.abs() + Is + 1.0).amax()
+                if ((log_abs_f < math.log(abs_tol)) and
+                        (log_abs_f - torch.log(magnitude + a_min) < math.log(rel_tol))):
+                    break
+        return _require_finite_tensor((sign*u).to(out_dtype), context="Single-Shockley returned voltage")
+
     def lambert_single_forward(
         self, a, b, I_s, v_off, vT,
-        z_thresh=1e10, polish=True,
-        abs_tol=1e-10, rel_tol=1e-10,
-        exp_clip=10000.0, a_min=1e-30, max_inner_iter=32
+        z_thresh=1e10, polish=True, abs_tol=1e-10, rel_tol=1e-10,
+        exp_clip=10000.0, a_min=1e-30, max_inner_iter=32,
     ):
-        out_dtype = a.dtype
-        device = a.device
+        """Solve 2av+b+Is*expm1((v-v_off)/vT)=0 without exponent clipping.
 
-        a64 = torch.clamp(a.to(torch.float64), min=a_min)
-        b64 = b.to(torch.float64).clamp(min=-self._b_clip, max=self._b_clip)
+        exp_clip is retained for configuration/API compatibility only.
+        """
+        return self._lambert_single_oriented(
+            a, b, I_s, v_off, vT, sign=1.0, z_thresh=z_thresh, polish=polish,
+            abs_tol=abs_tol, rel_tol=rel_tol, a_min=a_min, max_inner_iter=max_inner_iter,
+        )
 
-        Is64  = torch.as_tensor(I_s, dtype=torch.float64, device=device)
-        vT64  = torch.as_tensor(vT,  dtype=torch.float64, device=device)
-        voff64 = torch.as_tensor(v_off, dtype=torch.float64, device=device)
-        self._debug_tensor("a64", a64)
-        self._debug_tensor("b64", b64)
-        self._debug_tensor("Is64", Is64)
-        self._debug_tensor("vT64", vT64)
-        self._debug_tensor("voff64", voff64)
-
-        # Ashift = (b - I_s)/(2a)
-        Ashift = (b64 - Is64) / (2.0 * a64)
-        self._debug_tensor("Ashift_fwd", Ashift)
-
-        # z = (I_s/(2 a vT)) * exp(-(v_off + Ashift)/vT)
-        z = (Is64 / (2.0 * a64 * vT64)) * torch.exp(-(Ashift + voff64) / vT64)
-        self._debug_tensor("z_fwd", z)
-
-        use_asym = z > z_thresh
-        W0 = torch.empty_like(z, dtype=torch.float64, device=device)
-
-        if (~use_asym).any():
-            z_small = torch.clamp(z[~use_asym], max=float(z_thresh))
-            W0[~use_asym] = self._lambertw0(z_small).to(torch.float64)
-
-        if use_asym.any():
-            z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(
-                z_large,
-                terms=self._settings.lambertw_asymptotic_terms,
-            ).to(torch.float64)
-        self._debug_tensor("W0_fwd", W0)
-
-        # v* = -Ashift - vT * W0
-        x = -Ashift - vT64 * W0
-        self._debug_tensor("x_fwd", x)
-
-        if polish:
-            for _ in range(max_inner_iter):
-                arg = (x - voff64) / vT64
-                arg = torch.clamp(arg, min=-exp_clip, max=exp_clip)
-                e = torch.exp(arg)
-
-                f  = 2.0*a64*x + b64 + Is64*(e - 1.0)
-                df = 2.0*a64   + (Is64/vT64)*e
-                if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    self._debug_tensor("f_fwd", f)
-                    self._debug_tensor("df_fwd", df)
-                    break
-
-                step = f / df
-                x = x - step
-
-                max_abs_f = torch.max(torch.abs(f))
-                scale = torch.max(2.0*torch.abs(a64)*torch.abs(x) + torch.abs(b64) + torch.abs(Is64) + 1.0)
-                if (max_abs_f < abs_tol) and (max_abs_f/(scale + a_min) < rel_tol):
-                    break
-
-        return x.to(out_dtype)
-
-    # ---------- Reversed diode (your corrected equation) ----------
-    # 2 a v + b - I_s (exp((-(v + v_off))/vT) - 1) = 0
-    # <=> 2 a v + (b + I_s) - I_s exp(-(v + v_off)/vT) = 0
     def lambert_single_reverse(
         self, a, b, I_s, v_off, vT,
-        z_thresh=1e10, polish=True,
-        abs_tol=1e-10, rel_tol=1e-10,
-        exp_clip=10000.0, a_min=1e-30, max_inner_iter=32
+        z_thresh=1e10, polish=True, abs_tol=1e-10, rel_tol=1e-10,
+        exp_clip=10000.0, a_min=1e-30, max_inner_iter=32,
     ):
-        out_dtype = a.dtype
-        device = a.device
-
-        a64 = torch.clamp(a.to(torch.float64), min=a_min)
-        b64 = b.to(torch.float64).clamp(min=-self._b_clip, max=self._b_clip)
-
-        Is64  = torch.as_tensor(I_s, dtype=torch.float64, device=device)
-        vT64  = torch.as_tensor(vT,  dtype=torch.float64, device=device)
-        voff64 = torch.as_tensor(v_off, dtype=torch.float64, device=device)
-        self._debug_tensor("a64", a64)
-        self._debug_tensor("b64", b64)
-        self._debug_tensor("Is64", Is64)
-        self._debug_tensor("vT64", vT64)
-        self._debug_tensor("voff64", voff64)
-
-        # Ashift = (b + I_s)/(2a)
-        Ashift = (b64 + Is64) / (2.0 * a64)
-        self._debug_tensor("Ashift_rev", Ashift)
-
-        # z = (I_s/(2 a vT)) * exp( -v_off/vT + Ashift/vT )
-        z = (Is64 / (2.0 * a64 * vT64)) * torch.exp((-voff64 + Ashift) / vT64)
-        self._debug_tensor("z_rev", z)
-
-        use_asym = z > z_thresh
-        W0 = torch.empty_like(z, dtype=torch.float64, device=device)
-
-        if (~use_asym).any():
-            z_small = torch.clamp(z[~use_asym], max=float(z_thresh))
-            W0[~use_asym] = self._lambertw0(z_small).to(torch.float64)
-
-        if use_asym.any():
-            z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(
-                z_large,
-                terms=self._settings.lambertw_asymptotic_terms,
-            ).to(torch.float64)
-        self._debug_tensor("W0_rev", W0)
-
-        # v* = -Ashift + vT * W0
-        x = -Ashift + vT64 * W0
-        self._debug_tensor("x_rev", x)
-
-        if polish:
-            for _ in range(max_inner_iter):
-                arg = -(x + voff64) / vT64
-                arg = torch.clamp(arg, min=-exp_clip, max=exp_clip)
-                e = torch.exp(arg)
-
-                # f = 2 a v + b + I_s - I_s e^{-(v+v_off)/vT}
-                f  = 2.0*a64*x + b64 + Is64 - Is64*e
-                # df = 2 a + (I_s/vT) e^{-(v+v_off)/vT}
-                df = 2.0*a64   + (Is64/vT64)*e
-                if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    self._debug_tensor("f_rev", f)
-                    self._debug_tensor("df_rev", df)
-                    break
-
-                step = f / df
-                x = x - step
-
-                max_abs_f = torch.max(torch.abs(f))
-                scale = torch.max(2.0*torch.abs(a64)*torch.abs(x) + torch.abs(b64) + torch.abs(Is64) + 1.0)
-                if (max_abs_f < abs_tol) and (max_abs_f/(scale + a_min) < rel_tol):
-                    break
-
-        return x.to(out_dtype)
+        """Solve 2av+b-Is*expm1((-v-v_off)/vT)=0 with the same stable kernel."""
+        return self._lambert_single_oriented(
+            a, b, I_s, v_off, vT, sign=-1.0, z_thresh=z_thresh, polish=polish,
+            abs_tol=abs_tol, rel_tol=rel_tol, a_min=a_min, max_inner_iter=max_inner_iter,
+        )
 
 
 class HardSigmoidUpdater(QuadraticUpdater):
@@ -1216,115 +1150,11 @@ class _EquilibriumMinimizer(Minimizer):
 class Float64ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
     """Float64 exponential double-diode coordinate updater."""
 
-    def __init__(self, layer, fn, diode_params, settings: MinimizerSettings):
-        super().__init__(layer, fn, diode_params, settings)
-
-    def pre_activate(self):
-        b = self._b()
-        a = self._a().expand_as(b)
-        if isinstance(self._layer, NonlinearResistiveLayer):
-            return self.lambert_hidden(
-                a,
-                b,
-                self._Is,
-                self._v_off,
-                self._Vt,
-                z_thresh=self._settings.z_thresh,
-                polish=self._settings.use_polish,
-                exp_clip=self._settings.exp_clip,
-                max_inner_iter=self._settings.max_newton_iters,
-            )
-        return -b / (2.0 * a)
-
-    def lambertw_large(self, z, terms):
-        L1 = torch.log(z)
-        L2 = torch.log(L1)
-        w = L1 - L2
-        if terms >= 2:
-            w += L2 / L1
-        if terms >= 3:
-            w += (L2 * (-2 + L2)) / (2 * L1**2)
-        if terms >= 4:
-            w += (L2 * (6 - 9 * L2 + 2 * L2**2)) / (6 * L1**3)
-        return w
-
-    def lambert_hidden(self, a, b, I_s, v_off, vt, z_thresh, polish, exp_clip, max_inner_iter):
-        out_dtype = a.dtype
-        device = a.device
-
-        a64 = a.to(torch.float64)
-        b64 = b.to(torch.float64)
-        if getattr(self, "_b_clip", None) is not None:
-            b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
-        I_s64 = torch.as_tensor(I_s, dtype=torch.float64, device=device)
-        vt64 = torch.as_tensor(vt, dtype=torch.float64, device=device)
-        v_off64 = torch.as_tensor(v_off, dtype=torch.float64, device=device)
-
-        A = torch.where(
-            b64 <= 0,
-            (b64 - I_s64) / (2.0 * a64),
-            (b64 + I_s64) / (2.0 * a64),
-        )
-
-        exp_arg_add = (-(A + v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-        exp_arg_rev = ((A - v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-        z_add = (I_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg_add)
-        z_rev = (I_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg_rev)
-        z = torch.where(b64 > 0, z_rev, z_add)
-        _require_finite_tensor(z, context="Float64ExponentialDoubleDiodeUpdater Lambert-W argument")
-
-        use_asym = z > z_thresh
-        small_mask = ~use_asym
-        W0 = torch.empty_like(z, dtype=torch.float64, device=z.device)
-        if small_mask.any():
-            z_small = torch.clamp(z[small_mask].to(torch.float64), max=float(z_thresh))
-            W0[small_mask] = self._lambertw(z_small).real.to(W0.dtype)
-        if use_asym.any():
-            z_large = torch.clamp(z[use_asym].to(torch.float64), min=1.0)
-            W0[use_asym] = self.lambertw_large(
-                z_large,
-                terms=self._settings.lambertw_asymptotic_terms,
-            ).to(torch.float64)
-        _require_finite_tensor(W0, context="Float64ExponentialDoubleDiodeUpdater Lambert-W value")
-
-        x = torch.where(b64 > 0, vt64 * W0 - A, -vt64 * W0 - A)
-        _require_finite_tensor(x, context="Float64ExponentialDoubleDiodeUpdater initial voltage")
-        if polish:
-            current_tol = self._settings.double_diode_polish_residual_tol * x.shape[0]
-            f = torch.zeros_like(x)
-            df = torch.zeros_like(x)
-            for _ in range(max_inner_iter):
-                mask_pos = b64 <= 0
-                mask_neg = ~mask_pos
-                if mask_pos.any():
-                    xp = x[mask_pos]
-                    ap64 = a64[mask_pos]
-                    bp64 = b64[mask_pos]
-                    ep_arg = ((xp - v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-                    ep = torch.exp(ep_arg)
-                    f[mask_pos] = 2 * ap64 * xp + (bp64 - I_s) + I_s * ep
-                    df[mask_pos] = 2 * ap64 + (I_s / vt) * ep
-                if mask_neg.any():
-                    xn = x[mask_neg]
-                    an64 = a64[mask_neg]
-                    bn64 = b64[mask_neg]
-                    en_arg = ((-xn - v_off64) / vt64).clamp(min=-exp_clip, max=exp_clip)
-                    en = torch.exp(en_arg)
-                    f[mask_neg] = 2 * an64 * xn + (bn64 + I_s) - I_s * en
-                    df[mask_neg] = 2 * an64 + (I_s / vt) * en
-                if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    raise NonFiniteDiodeError(
-                        "Float64ExponentialDoubleDiodeUpdater: non-finite Newton residual or derivative."
-                    )
-                x = x - f / df
-                _require_finite_tensor(x, context="Float64ExponentialDoubleDiodeUpdater polished voltage")
-                if torch.norm(f) < current_tol:
-                    break
-        return x.to(out_dtype)
-
 
 class Float32ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
     """Float32 double-diode updater with optional SOR-style overrelaxation."""
+
+    _work_dtype = torch.float32
 
     def __init__(
         self,
@@ -1339,111 +1169,11 @@ class Float32ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
         self._overrelaxation_factor = float(overrelaxation_factor)
 
     def pre_activate(self):
-        b = self._b()
-        a = self._a().expand_as(b)
-        if isinstance(self._layer, NonlinearResistiveLayer):
-            v = self.lambert_hidden(
-                a,
-                b,
-                self._Is,
-                self._v_off,
-                self._Vt,
-                z_thresh=self._settings.z_thresh,
-                polish=self._settings.use_polish,
-                exp_clip=self._settings.exp_clip,
-                max_inner_iter=self._settings.max_newton_iters,
-            )
-        else:
-            v = -b / (2.0 * a)
+        v = super().pre_activate()
         omega = self._overrelaxation_factor
         if omega == 1.0:
             return v
         return self._layer.state + omega * (v - self._layer.state)
-
-    def lambertw_large(self, z, terms):
-        L1 = torch.log(z)
-        L2 = torch.log(L1)
-        w = L1 - L2
-        if terms >= 2:
-            w += L2 / L1
-        if terms >= 3:
-            w += (L2 * (-2 + L2)) / (2 * L1**2)
-        if terms >= 4:
-            w += (L2 * (6 - 9 * L2 + 2 * L2**2)) / (6 * L1**3)
-        return w
-
-    def lambert_hidden(self, a, b, I_s, v_off, vt, z_thresh, polish, exp_clip, max_inner_iter):
-        out_dtype = a.dtype
-        device = a.device
-        work_dtype = torch.float32
-        a_work = a.to(work_dtype)
-        b_work = b.to(work_dtype)
-        if getattr(self, "_b_clip", None) is not None:
-            b_work = b_work.clamp(min=-self._b_clip, max=self._b_clip)
-        I_s_work = torch.as_tensor(I_s, dtype=work_dtype, device=device)
-        vt_work = torch.as_tensor(vt, dtype=work_dtype, device=device)
-        v_off_work = torch.as_tensor(v_off, dtype=work_dtype, device=device)
-
-        A = torch.where(
-            b_work <= 0,
-            (b_work - I_s_work) / (2.0 * a_work),
-            (b_work + I_s_work) / (2.0 * a_work),
-        )
-        exp_arg_add = (-(A + v_off_work) / vt_work).clamp(min=-exp_clip, max=exp_clip)
-        exp_arg_rev = ((A - v_off_work) / vt_work).clamp(min=-exp_clip, max=exp_clip)
-        z_add = (I_s_work / (2.0 * a_work * vt_work)) * torch.exp(exp_arg_add)
-        z_rev = (I_s_work / (2.0 * a_work * vt_work)) * torch.exp(exp_arg_rev)
-        z = torch.where(b_work > 0, z_rev, z_add)
-        _require_finite_tensor(z, context="Float32ExponentialDoubleDiodeUpdater Lambert-W argument")
-
-        use_asym = z > z_thresh
-        small_mask = ~use_asym
-        W0 = torch.empty_like(z, dtype=work_dtype, device=device)
-        if small_mask.any():
-            z_small = torch.clamp(z[small_mask], max=float(z_thresh)).to(torch.float64)
-            W0[small_mask] = self._lambertw(z_small).real.to(work_dtype)
-        if use_asym.any():
-            z_large = torch.clamp(z[use_asym], min=1.0).to(torch.float64)
-            W0[use_asym] = self.lambertw_large(
-                z_large,
-                terms=self._settings.lambertw_asymptotic_terms,
-            ).to(work_dtype)
-        _require_finite_tensor(W0, context="Float32ExponentialDoubleDiodeUpdater Lambert-W value")
-
-        x = torch.where(b_work > 0, vt_work * W0 - A, -vt_work * W0 - A)
-        _require_finite_tensor(x, context="Float32ExponentialDoubleDiodeUpdater initial voltage")
-        if polish:
-            current_tol = self._settings.double_diode_polish_residual_tol * x.shape[0]
-            f = torch.zeros_like(x)
-            df = torch.zeros_like(x)
-            for _ in range(max_inner_iter):
-                mask_pos = b_work <= 0
-                mask_neg = ~mask_pos
-                if mask_pos.any():
-                    xp = x[mask_pos]
-                    ap_work = a_work[mask_pos]
-                    bp_work = b_work[mask_pos]
-                    ep_arg = ((xp - v_off_work) / vt_work).clamp(min=-exp_clip, max=exp_clip)
-                    ep = torch.exp(ep_arg)
-                    f[mask_pos] = 2 * ap_work * xp + (bp_work - I_s_work) + I_s_work * ep
-                    df[mask_pos] = 2 * ap_work + (I_s_work / vt_work) * ep
-                if mask_neg.any():
-                    xn = x[mask_neg]
-                    an_work = a_work[mask_neg]
-                    bn_work = b_work[mask_neg]
-                    en_arg = ((-xn - v_off_work) / vt_work).clamp(min=-exp_clip, max=exp_clip)
-                    en = torch.exp(en_arg)
-                    f[mask_neg] = 2 * an_work * xn + (bn_work + I_s_work) - I_s_work * en
-                    df[mask_neg] = 2 * an_work + (I_s_work / vt_work) * en
-                if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    raise NonFiniteDiodeError(
-                        "Float32ExponentialDoubleDiodeUpdater: non-finite Newton residual or derivative."
-                    )
-                x = x - f / df
-                _require_finite_tensor(x, context="Float32ExponentialDoubleDiodeUpdater polished voltage")
-                if torch.norm(f) < current_tol:
-                    break
-        return x.to(out_dtype)
 
 
 class OverRelaxedFloat64DoubleDiodeUpdater(Float64ExponentialDoubleDiodeUpdater):
@@ -1531,148 +1261,24 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
         return self._lambertw(z).real
 
     def lambert_single_forward(
-        self,
-        a,
-        b,
-        I_s,
-        v_on,
-        vT,
-        z_thresh,
-        polish,
-        abs_tol,
-        rel_tol,
-        exp_clip,
-        a_min,
-        max_inner_iter,
+        self, a, b, I_s, v_on, vT, z_thresh, polish, abs_tol, rel_tol,
+        exp_clip, a_min, max_inner_iter,
     ):
-        """Solve ``2av + b + Is(exp((v - v_on) / vT) - 1) = 0``."""
-        out_dtype = a.dtype
-        device = a.device
-
-        a64 = torch.clamp(a.to(torch.float64), min=a_min)
-        b64 = b.to(torch.float64)
-        b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
-        i_s64 = torch.as_tensor(I_s, dtype=torch.float64, device=device)
-        vt64 = torch.as_tensor(vT, dtype=torch.float64, device=device)
-        v_on64 = torch.as_tensor(v_on, dtype=torch.float64, device=device)
-
-        a_shift = (b64 - i_s64) / (2.0 * a64)
-        exp_arg = (-(a_shift + v_on64) / vt64).clamp(max=exp_clip)
-        z = (i_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg)
-        if not torch.isfinite(z).all():
-            raise NonFiniteDiodeError(
-                "ConfigurableExponentialSingleDiodeUpdater: non-finite z in lambert_single_forward."
-            )
-
-        use_asym = z > z_thresh
-        W0 = torch.empty_like(z, dtype=torch.float64, device=device)
-        if (~use_asym).any():
-            z_small = torch.clamp(z[~use_asym], max=float(z_thresh))
-            W0[~use_asym] = self._lambertw0(z_small).to(torch.float64)
-        if use_asym.any():
-            z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(
-                z_large,
-                terms=self._settings.lambertw_asymptotic_terms,
-            ).to(torch.float64)
-
-        x = -a_shift - vt64 * W0
-        if polish:
-            for _ in range(max_inner_iter):
-                arg = (x - v_on64) / vt64
-                arg = torch.clamp(arg, min=-exp_clip, max=exp_clip)
-                e = torch.exp(arg)
-                f = 2.0 * a64 * x + b64 + i_s64 * (e - 1.0)
-                df = 2.0 * a64 + (i_s64 / vt64) * e
-                if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    raise NonFiniteDiodeError(
-                        "ConfigurableExponentialSingleDiodeUpdater: non-finite f/df in "
-                        "lambert_single_forward."
-                    )
-                step = f / df
-                x = x - step
-                max_abs_f = torch.max(torch.abs(f))
-                scale = torch.max(
-                    2.0 * torch.abs(a64) * torch.abs(x)
-                    + torch.abs(b64)
-                    + torch.abs(i_s64)
-                    + 1.0
-                )
-                if (max_abs_f < abs_tol) and (max_abs_f / (scale + a_min) < rel_tol):
-                    break
-        return x.to(out_dtype)
+        """Preserve the configurable API while sharing the full-law kernel."""
+        return super().lambert_single_forward(
+            a, b, I_s, v_on, vT, z_thresh, polish, abs_tol, rel_tol,
+            exp_clip, a_min, max_inner_iter,
+        )
 
     def lambert_single_reverse(
-        self,
-        a,
-        b,
-        I_s,
-        v_on,
-        vT,
-        z_thresh,
-        polish,
-        abs_tol,
-        rel_tol,
-        exp_clip,
-        a_min,
-        max_inner_iter,
+        self, a, b, I_s, v_on, vT, z_thresh, polish, abs_tol, rel_tol,
+        exp_clip, a_min, max_inner_iter,
     ):
-        """Solve ``2av + b - Is(exp(-(v + v_on) / vT) - 1) = 0``."""
-        out_dtype = a.dtype
-        device = a.device
-
-        a64 = torch.clamp(a.to(torch.float64), min=a_min)
-        b64 = b.to(torch.float64)
-        b64 = b64.clamp(min=-self._b_clip, max=self._b_clip)
-        i_s64 = torch.as_tensor(I_s, dtype=torch.float64, device=device)
-        vt64 = torch.as_tensor(vT, dtype=torch.float64, device=device)
-        v_on64 = torch.as_tensor(v_on, dtype=torch.float64, device=device)
-
-        a_shift = (b64 + i_s64) / (2.0 * a64)
-        exp_arg = ((-v_on64 + a_shift) / vt64).clamp(min=-exp_clip, max=exp_clip)
-        z = (i_s64 / (2.0 * a64 * vt64)) * torch.exp(exp_arg)
-        if not torch.isfinite(z).all():
-            raise NonFiniteDiodeError(
-                "ConfigurableExponentialSingleDiodeUpdater: non-finite z in lambert_single_reverse."
-            )
-
-        use_asym = z > z_thresh
-        W0 = torch.empty_like(z, dtype=torch.float64, device=device)
-        if (~use_asym).any():
-            z_small = torch.clamp(z[~use_asym], max=float(z_thresh))
-            W0[~use_asym] = self._lambertw0(z_small).to(torch.float64)
-        if use_asym.any():
-            z_large = torch.clamp(z[use_asym], min=1.0)
-            W0[use_asym] = self.lambertw_large(
-                z_large,
-                terms=self._settings.lambertw_asymptotic_terms,
-            ).to(torch.float64)
-
-        x = -a_shift + vt64 * W0
-        if polish:
-            for _ in range(max_inner_iter):
-                arg = -(x + v_on64) / vt64
-                arg = torch.clamp(arg, min=-exp_clip, max=exp_clip)
-                e = torch.exp(arg)
-                f = 2.0 * a64 * x + b64 + i_s64 - i_s64 * e
-                df = 2.0 * a64 + (i_s64 / vt64) * e
-                if not torch.isfinite(f).all() or not torch.isfinite(df).all():
-                    raise NonFiniteDiodeError(
-                        "ConfigurableExponentialSingleDiodeUpdater: non-finite f/df in "
-                        "lambert_single_reverse."
-                    )
-                step = f / df
-                x = x - step
-                max_abs_f = torch.max(torch.abs(f))
-                scale = torch.max(
-                    2.0 * torch.abs(a64) * torch.abs(x)
-                    + torch.abs(b64)
-                    + torch.abs(i_s64)
-                    + 1.0
-                )
-                if (max_abs_f < abs_tol) and (max_abs_f / (scale + a_min) < rel_tol):
-                    break
-        return x.to(out_dtype)
+        """Reverse orientation of the same unclipped Shockley equation."""
+        return super().lambert_single_reverse(
+            a, b, I_s, v_on, vT, z_thresh, polish, abs_tol, rel_tol,
+            exp_clip, a_min, max_inner_iter,
+        )
 
 
 class OverRelaxedSingleDiodeUpdater(ConfigurableExponentialSingleDiodeUpdater):

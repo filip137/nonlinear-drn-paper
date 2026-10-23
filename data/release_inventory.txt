@@ -367,6 +367,7 @@ tests/conftest.py
 tests/test_configs.py
 tests/test_demo.py
 tests/test_device.py
+tests/test_double_shockley.py
 tests/test_environment.py
 tests/test_manifest.py
 tests/test_minimizer_layout.py
@@ -375,6 +376,7 @@ tests/test_paper_figures.py
 tests/test_replay_runtime_v2.py
 tests/test_replay_v2_data.py
 tests/test_runner.py
+tests/test_single_shockley.py
 tests/test_small_network.py
 tests/test_strict_config.py
 tests/test_training_smoke.py

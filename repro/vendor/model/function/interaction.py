@@ -806,14 +806,11 @@ class DoubleQuadraticNonLinearInteraction(Function):
 
 
 class DoubleExponentialNonLinearInteraction(Function):
-    """Interaction with the quadrati dissipative non-linearity
+    """Convex primitive of the manuscript's double-Shockley approximation.
 
-    A nonlinear interaction is defined between the voltage at the hidden layer and ground connected by the nonlineairty
-    We scale the parameter I_s in the case there is amplification
-    Attributes
-    ----------
-    layer (Layer): the layer involved in the interaction
-    non_lineartiy (string) : type of the non linearity involved in the interaction
+    Away from zero, i(v) = sign(v) I_s exp((abs(v) - V_off) / V_t).
+    The primitive is zero at v = 0. Amplification scales I_s as in the
+    other energy terms; the physical local KCL uses the unscaled current.
     """
     def __init__(self, layer, params, voltage_amp, current_amp):
         self._layer = layer
@@ -837,19 +834,15 @@ class DoubleExponentialNonLinearInteraction(Function):
 
 
     def eval(self):
-        """Energy term of the non-linearity.
-
-        Returns:
-        """
+        """Return the primitive, summed over each sample's nodes."""
         v = self._layer.state
         abs_v = torch.abs(v)
         Is = tensor_like(self._saturation_current(), v)
         vt = torch.as_tensor(self.vt, dtype=v.dtype, device=v.device)
         voff = torch.as_tensor(self.v_off, dtype=v.dtype, device=v.device)
-        excess = torch.clamp(abs_v - voff, min=0.0)
-
-
-        energy = Is * vt * (torch.exp((excess) / vt) - torch.exp(-voff / vt)) - Is * excess
+        # I_s V_t [exp((abs(v) - V_off) / V_t) - exp(-V_off / V_t)].
+        # This equivalent product avoids cancellation close to v = 0.
+        energy = Is * vt * torch.exp((abs_v - voff) / vt) * (-torch.expm1(-abs_v / vt))
 
         return energy.flatten(start_dim=1).sum(dim=1)
 
@@ -859,16 +852,14 @@ class DoubleExponentialNonLinearInteraction(Function):
         return dictionary[layer]
 
     def _grad_layer(self):
-        """Analytical gradient of the exponential diode energy wrt the layer state.
-        I think I need to multiply it by 1/current amplification because essentially at the node after the amplification"""
+        """Return the branch current, choosing the zero subgradient at v = 0."""
         v = self._layer.state
-        v_eff = v
-        abs_v = torch.abs(v_eff)
+        abs_v = torch.abs(v)
         Is = tensor_like(self._saturation_current(), v)
         vt = torch.as_tensor(self.vt, dtype=v.dtype, device=v.device)
         voff = torch.as_tensor(self.v_off, dtype=v.dtype, device=v.device)
 
-        grad_abs = Is * (torch.exp((abs_v - voff) / vt) - 1.0)
+        grad_abs = Is * torch.exp((abs_v - voff) / vt)
         grad = grad_abs * torch.sign(v)
 
         return grad
