@@ -114,6 +114,28 @@ def test_coordinate_update_matches_bracketed_kcl(cls, polish):
 
 @pytest.mark.parametrize("cls", UPDATERS)
 @pytest.mark.parametrize("polish", [False, True])
+def test_root_with_diode_free_exponent_beyond_exp_clip(cls, polish):
+    # Diode-free voltages A = |b|/2a of 5-5000 V put (A - V_off)/V_t at 84-1e5,
+    # far past exp_clip = 70; the root itself sits near V_off + V_t log(|b|/I_s).
+    dtype = cls._work_dtype
+    a = torch.tensor([[1e-6], [1e-4], [1e-2]], dtype=dtype)
+    b = torch.cat((-1e4 * a, -1e3 * a, -1e2 * a, -10 * a, 10 * a, 1e2 * a, 1e3 * a, 1e4 * a), dim=1)
+    a = a.expand_as(b)
+    result = _updater(cls, a, b, polish=polish).pre_activate()
+    expected = np.array([
+        _bracketed_root(float(aa), float(bb), PARAMS)
+        for aa, bb in zip(a.flatten(), b.flatten())
+    ]).reshape(b.shape)
+    if dtype == torch.float32:
+        atol = 1e-6 if polish else 1e-4
+    else:
+        atol = 1e-12 if polish else 1e-5
+    np.testing.assert_allclose(result.numpy(), expected, rtol=0, atol=atol)
+    assert np.abs(expected).max() < 2.0
+
+
+@pytest.mark.parametrize("cls", UPDATERS)
+@pytest.mark.parametrize("polish", [False, True])
 def test_zero_branch_includes_both_subgradient_endpoints(cls, polish):
     # V_off = 0 makes the endpoints exactly representable in each work dtype.
     params = dict(PARAMS, I_s=0.125, V_off=0.0)
