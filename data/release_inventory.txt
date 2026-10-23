@@ -364,6 +364,7 @@ scripts/small_network.py
 scripts/train_drn.py
 scripts/update_checksums.py
 tests/conftest.py
+tests/test_adaptive_relaxation.py
 tests/test_configs.py
 tests/test_demo.py
 tests/test_device.py

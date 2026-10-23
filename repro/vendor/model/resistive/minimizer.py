@@ -6,6 +6,7 @@ experiment configuration remain in ``repro`` so the model layer stays usable
 on its own.
 """
 
+import cmath
 import math
 import os
 from dataclasses import dataclass
@@ -1008,6 +1009,93 @@ class _EquilibriumMinimizer(Minimizer):
         self._iterations_performed = 0
         self._final_max_voltage_change = math.inf
         self._final_reference_scale = math.inf
+        self._relaxation = None
+
+    def set_adaptive_relaxation(
+        self, *, estimator="two_term", initial=1.0, maximum=1.95, settle=3,
+        agreement=0.05, step=0.01, stability=0.05, margin=0.02,
+    ):
+        """Choose the relaxation factor during each solve from the sweep updates.
+
+        Linearized at its fixed point, this CD with exact local solves is SOR on the KCL
+        Jacobian, whose layer blocks make it 2-cyclic and consistently ordered (odd/even
+        sweeps), so Young's theory holds: (lambda + omega - 1)^2 = lambda omega^2 mu^2 and
+        omega_opt = 2 / (1 + sqrt(1 - mu^2)). The Jacobi spectral radius mu falls as diodes
+        conduct, so it is estimated from the last three sweep updates rather than fixed per
+        network. 'ratio' (Hageman-Young) only raises omega, from the update-norm ratio;
+        'two_term' fits delta_k = a delta_{k-1} + b delta_{k-2}, whose dominant root may be real
+        or complex, and can also lower omega.
+        """
+        if any(not hasattr(updater, "_overrelaxation_factor") for updater in self._updaters):
+            raise ValueError("Adaptive relaxation requires the over-relaxed updaters (relaxation != 1).")
+        _require_choice(estimator, ("ratio", "two_term"), field="estimator")
+        if not 1.0 <= initial <= maximum < 2.0:
+            raise ValueError(f"Expected 1 <= initial <= maximum < 2. Provided: {initial!r}, {maximum!r}.")
+        self._relaxation = dict(estimator=estimator, initial=float(initial), maximum=float(maximum), settle=int(settle),
+                                agreement=agreement, step=step, stability=stability, margin=margin)
+        self._reset_relaxation()
+
+    @property
+    def relaxation_factor(self):
+        """Current adaptive relaxation factor, or None when each updater keeps its own."""
+
+        return None if self._relaxation is None else self._omega
+
+    def _set_relaxation_factor(self, omega):
+        self._omega = omega
+        for updater in self._updaters:
+            updater._overrelaxation_factor = omega
+
+    def _reset_relaxation(self):
+        self._updates, self._since_change, self._last_mu2 = [], 0, None
+        self._set_relaxation_factor(self._relaxation["initial"])
+
+    def _two_term_mu2(self):
+        d0, d1, d2 = self._updates
+        g00, g01, g11 = float(d0 @ d0), float(d0 @ d1), float(d1 @ d1)
+        if g00 == 0.0 or g11 == 0.0:
+            return None
+        det = g00 * g11 - g01 * g01
+        if det <= 1e-10 * g00 * g11:
+            lam = complex(float(d2 @ d1) / g11)
+        else:
+            r1, r0 = float(d2 @ d1), float(d2 @ d0)
+            a, b = (r1 * g00 - r0 * g01) / det, (r0 * g11 - r1 * g01) / det
+            root = cmath.sqrt(a * a + 4.0 * b)
+            lam = max((a + root) / 2.0, (a - root) / 2.0, key=abs)
+        if not 0.0 < abs(lam) < 1.0:
+            return None
+        omega = self._omega
+        return abs(lam + omega - 1.0) ** 2 / (omega * omega * abs(lam))
+
+    def _adapt_relaxation(self, update):
+        policy = self._relaxation
+        self._updates = self._updates[-2:] + [update]
+        self._since_change += 1
+        if self._since_change < policy["settle"]:
+            return
+        omega, maximum = self._omega, policy["maximum"]
+        if policy["estimator"] == "ratio":
+            n0, n1, n2 = (float(torch.linalg.vector_norm(d)) for d in self._updates)
+            if n0 == 0.0 or n1 == 0.0:
+                return
+            r0, r1 = n1 / n0, n2 / n1
+            if 0.0 < r1 < 1.0 and abs(r1 - r0) <= policy["stability"] * r1 and r1 > omega - 1.0 + policy["margin"]:
+                mu2 = (r1 + omega - 1.0) ** 2 / (r1 * omega * omega)
+                new = min(2.0 / (1.0 + math.sqrt(max(0.0, 1.0 - mu2))), maximum)
+                if new > omega + 1e-3:
+                    self._set_relaxation_factor(new)
+                    self._since_change = 0
+            return
+        mu2 = self._two_term_mu2()
+        last, self._last_mu2 = self._last_mu2, mu2
+        if (mu2 is None or last is None or not 0.0 <= mu2 < 1.0
+                or abs(mu2 - last) > policy["agreement"] * max(1.0 - mu2, 1e-3)):
+            return
+        new = max(1.0, min(2.0 / (1.0 + math.sqrt(1.0 - mu2)), maximum))
+        if abs(new - omega) > policy["step"]:
+            self._set_relaxation_factor(new)
+            self._since_change, self._last_mu2 = 0, None
 
     @property
     def iterations_performed(self):
@@ -1047,7 +1135,7 @@ class _EquilibriumMinimizer(Minimizer):
         self.step(layer_group_odd)
         self.step(layer_group_even)
 
-    def compute_equilibrium(self):
+    def compute_equilibrium(self, *, resume=False):
         """Compute equilibrium using fixed sweeps or adaptive stopping."""
 
         if self._mode != "asynchronous":
@@ -1115,6 +1203,9 @@ class _EquilibriumMinimizer(Minimizer):
         else:
             rtol = self._settings.rel_tol
             vntol = self._settings.vn_tol
+            relaxing = self._relaxation is not None
+            if relaxing and not resume:
+                self._reset_relaxation()
             for _ in range(max_num_of_iterations):
                 layer_group_odd, layer_group_even = self._list_layers[0], self._list_layers[1]
                 odd_old = [u._layer.state.detach().clone() for u in layer_group_odd]
@@ -1129,6 +1220,13 @@ class _EquilibriumMinimizer(Minimizer):
                 for updater, old_state in zip(layer_group_even, even_old):
                     inf_delta = max(inf_delta, self._max_abs_delta(updater._layer.state, old_state))
                     inf_ref = max(inf_ref, float(old_state.abs().max().item()))
+
+                # Updates at roundoff level carry no spectral information.
+                if relaxing and inf_delta > 64.0 * torch.finfo(torch.float64).eps * inf_ref:
+                    self._adapt_relaxation(torch.cat([
+                        (u._layer.state - old).reshape(-1).to(torch.float64)
+                        for u, old in zip((*layer_group_odd, *layer_group_even), (*odd_old, *even_old))
+                    ]))
 
                 self._iterations_performed += 1
                 self._final_max_voltage_change = inf_delta
