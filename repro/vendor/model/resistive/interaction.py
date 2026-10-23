@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn.functional as F
 
-from model.function.interaction import QFunction
+from model.function.interaction import QFunction, cached_coefficient
 from model.variable.layer import LinearLayer, layer_index
 
 
@@ -39,6 +39,8 @@ class DenseResistive(QFunction):
         self._weight = dense_weight
         self._voltage_amp = voltage_amp
         self._current_amp = current_amp
+        self._coefficient_cache = {}
+        self._input_term = None
 
         QFunction.__init__(self, [layer_pre, layer_post], [dense_weight])
 
@@ -108,13 +110,17 @@ class DenseResistive(QFunction):
             Tensor of shape (batch_size, layer_pre_shape) and type float32: the linear contribution on layer_pre
         """
 
-        dims_pre = len(self._layer_pre.shape)
-        a_coef = 0.5 * self._weight.get().flatten(start_dim=dims_pre).sum(dim=-1).unsqueeze(0)
+        weight = self._weight.get()
 
-        #if not isinstance(self._layer_post, LinearLayer):
-        a_coef = a_coef * self._voltage_amp * self._current_amp
+        def compute():
+            dims_pre = len(self._layer_pre.shape)
+            a_coef = 0.5 * weight.flatten(start_dim=dims_pre).sum(dim=-1).unsqueeze(0)
+            #if not isinstance(self._layer_post, LinearLayer):
+            return a_coef * self._voltage_amp * self._current_amp
 
-        return a_coef
+        # Depends only on the weights: reuse it until they change.
+        return cached_coefficient(self._coefficient_cache, "a_pre", compute,
+                                  weight, self._voltage_amp, self._current_amp)
 
     def _b_coef_layer_post(self):
         """Returns the interaction's linear influence on the post-synaptic layer.
@@ -124,11 +130,25 @@ class DenseResistive(QFunction):
         """
 
         layer_pre = self._layer_pre.state
-        dims_pre = len(self._layer_pre.shape)  # number of dimensions involved in the tensor product
-        b_coef = - torch.tensordot(layer_pre, self._weight.get(), dims=dims_pre)
-        if not _is_first_free_layer(self._layer_post):
-            b_coef = b_coef * self._voltage_amp
-        return b_coef
+        weight = self._weight.get()
+
+        def compute():
+            dims_pre = len(self._layer_pre.shape)  # number of dimensions involved in the tensor product
+            b_coef = - torch.tensordot(layer_pre, weight, dims=dims_pre)
+            if not _is_first_free_layer(self._layer_post):
+                b_coef = b_coef * self._voltage_amp
+            return b_coef
+
+        if not _is_input_layer(self._layer_pre):
+            return compute()
+        # The input layer is clamped, so its term is fixed for one input. Its state is
+        # compared by value: it may be an inference tensor, which has no version counter.
+        cached = self._input_term
+        if (cached is not None and cached[0].shape == layer_pre.shape and cached[0].dtype == layer_pre.dtype
+                and cached[0].device == layer_pre.device and torch.equal(cached[0], layer_pre)):
+            return cached_coefficient(cached[1], "b_input", compute, weight, self._voltage_amp)
+        self._input_term = (layer_pre.clone(), {})
+        return cached_coefficient(self._input_term[1], "b_input", compute, weight, self._voltage_amp)
 
     def _a_coef_layer_post(self):
         """Returns the interaction's quadratic influence on the post-synaptic layer.
@@ -137,10 +157,14 @@ class DenseResistive(QFunction):
             Tensor of shape (batch_size, layer_post_shape) and type float32: the quadratic contribution on layer_post
         """
 
-        dims = len(self._layer_pre.shape) - 1
-        a_coef = 0.5 * self._weight.get().flatten(end_dim=dims).sum(dim=0).unsqueeze(0)
+        weight = self._weight.get()
 
-        return a_coef
+        def compute():
+            dims = len(self._layer_pre.shape) - 1
+            return 0.5 * weight.flatten(end_dim=dims).sum(dim=0).unsqueeze(0)
+
+        # Depends only on the weights: reuse it until they change.
+        return cached_coefficient(self._coefficient_cache, "a_post", compute, weight)
 
     def _grad_weight(self):
         """Returns the interaction's gradient wrt the weight

@@ -101,17 +101,16 @@ class NonlinearResistiveLayer(Layer):
         else:
             raise ValueError(f"Unknown non-linearity: {self.non_linearity}")
 
+        if activation_mode == "no_clip":
+            # No clamping - soft constraints handled in pre_activate (hard_sigmoid) or linear activation (linear).
+            # The state is already final; splitting it in halves and concatenating them back only copied it.
+            return self._state
 
         dimension = self._shape[0] // 2  # number of excitatory units = number of inhibitory units = number of units / 2
 
-        if activation_mode == 'hard_clip':
-            # Apply hard clamping (original behavior)
-            excitatory = self._state[:,:dimension].clamp(min=0., max=None)  # the first half of the units are excitatory units
-            inhibitory = self._state[:,dimension:].clamp(min=None, max=0.)  # the second half of the units are inhibitory units
-        elif activation_mode == "no_clip":
-            # No clamping - soft constraints handled in pre_activate (hard_sigmoid) or linear activation (linear)
-            excitatory = self._state[:,:dimension]
-            inhibitory = self._state[:,dimension:]
+        # Apply hard clamping (original behavior)
+        excitatory = self._state[:,:dimension].clamp(min=0., max=None)  # the first half of the units are excitatory units
+        inhibitory = self._state[:,dimension:].clamp(min=None, max=0.)  # the second half of the units are inhibitory units
 
         return torch.cat((excitatory, inhibitory), 1)  # we concatenate excitatory and inhibitory units
 

@@ -682,14 +682,12 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
             W0[use_asym] = self.lambertw_large_log(
                 log_z[use_asym].to(torch.float64), terms=self._settings.lambertw_asymptotic_terms,
             ).to(work_dtype)
-        _require_finite_tensor(W0, context=f"{context} Lambert-W value")
 
         magnitude = torch.where(active, (A - vt * W0).clamp(min=0.0), 0.0)
         # For large z, A - V_t W0 subtracts nearly equal voltages; W0 e^W0 = z gives the
         # same root as V_off + V_t (log W0 - log_prefactor) without the cancellation.
         if use_asym.any():
             magnitude[use_asym] = v_off + vt * (torch.log(W0[use_asym]) - log_prefactor[use_asym])
-        _require_finite_tensor(magnitude, context=f"{context} initial voltage")
         if polish and active.any():
             current_tol = self._settings.double_diode_polish_residual_tol * b_work.shape[0]
             t = magnitude[active]
@@ -700,14 +698,13 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
                 current = Is * torch.exp(exp_arg)
                 residual = 2.0 * a_active * t - drive_active + current
                 derivative = 2.0 * a_active + current / vt
-                _require_finite_tensor(residual, context=f"{context} Newton residual")
-                _require_finite_tensor(derivative, context=f"{context} Newton derivative")
                 t = (t - residual / derivative).clamp(min=0.0)
-                _require_finite_tensor(t, context=f"{context} polished voltage")
                 if torch.norm(residual) < current_tol:
                     break
             magnitude[active] = t
-        return (-torch.sign(b_work) * magnitude).to(out_dtype)
+        # A non-finite W, residual or step propagates here as NaN (clamp keeps NaN), so
+        # one check of the result replaces a check after every step.
+        return _require_finite_tensor((-torch.sign(b_work) * magnitude).to(out_dtype), context=f"{context} voltage")
 
 
 class ExponentialSingleDiodeUpdater(QuadraticUpdater):
@@ -737,6 +734,30 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         # True  -> reversed diode
         # False -> forward diode
         self._reverse_mask = diode_params.get("reverse_mask", None)
+        self._orientation_signs = None
+
+    def _solve_layer(self, a, b):
+        """Solve every node once, in its own orientation.
+
+        The first half of the nodes holds forward diodes and the second half reversed
+        ones. A per-node sign (+1 forward, -1 reverse) runs both through one pass of
+        the shared kernel, instead of solving every node both ways and discarding half.
+        """
+        width = b.shape[1]
+        sign = self._orientation_signs
+        if sign is None or sign.shape[1] != width or sign.device != b.device:
+            reverse = torch.arange(width, device=b.device) >= (width // 2)
+            sign = torch.where(reverse, -1.0, 1.0).to(torch.float64).unsqueeze(0)
+            self._orientation_signs = sign
+        return self._lambert_single_oriented(
+            a, b, self._Is, self._v_off, self._Vt, sign=sign,
+            z_thresh=self._settings.z_thresh,
+            polish=self._settings.use_polish,
+            abs_tol=self._settings.single_diode_polish_abs_tol,
+            rel_tol=self._settings.single_diode_polish_rel_tol,
+            a_min=self._settings.single_diode_min_a,
+            max_inner_iter=self._settings.max_newton_iters,
+        )
 
     def _debug_tensor(self, name, tensor):
         if not os.environ.get("DRN_DEBUG_DIODE"):
@@ -777,30 +798,9 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         if not isinstance(self._layer, NonlinearResistiveLayer):
             return -b / (2.0 * a)
 
-        # node-wise mask: [M] -> broadcast to [N, M]
-        M = b.shape[1]
-        reverse_mask_nodes = torch.arange(M, device=b.device) >= (M // 2)  # [M]
-        reverse_mask = reverse_mask_nodes.unsqueeze(0).expand_as(b)         # [N, M]
-
-        solver_settings = {
-            "z_thresh": self._settings.z_thresh,
-            "polish": self._settings.use_polish,
-            "abs_tol": self._settings.single_diode_polish_abs_tol,
-            "rel_tol": self._settings.single_diode_polish_rel_tol,
-            "exp_clip": self._settings.exp_clip,
-            "a_min": self._settings.single_diode_min_a,
-            "max_inner_iter": self._settings.max_newton_iters,
-        }
-        v_fwd = self.lambert_single_forward(
-            a, b, self._Is, self._v_off, self._Vt, **solver_settings
-        )
-        v_rev = self.lambert_single_reverse(
-            a, b, self._Is, self._v_off, self._Vt, **solver_settings
-        )
-        self._debug_tensor("v_fwd", v_fwd)
-        self._debug_tensor("v_rev", v_rev)
-
-        return torch.where(reverse_mask, v_rev, v_fwd)
+        v = self._solve_layer(a, b)
+        self._debug_tensor("v", v)
+        return v
 
 
     # ---------- Lambert-W helpers ----------
@@ -1139,7 +1139,8 @@ class _EquilibriumMinimizer(Minimizer):
         """Compute equilibrium using fixed sweeps or adaptive stopping."""
 
         if self._mode != "asynchronous":
-            previous = [updater._layer.state.detach().clone() for updater in self._updaters]
+            # Minimizer.step assigns new state tensors, so references suffice.
+            previous = [updater._layer.state.detach() for updater in self._updaters]
             result = Minimizer.compute_equilibrium(self)
             self._iterations_performed = self._num_iterations
             self._final_max_voltage_change = max(
@@ -1163,13 +1164,15 @@ class _EquilibriumMinimizer(Minimizer):
         if not use_adaptive:
             if len(self._list_layers) >= 2:
                 layer_group_odd, layer_group_even = self._list_layers[0], self._list_layers[1]
-                for _ in range(max_num_of_iterations):
-                    old_states = [
-                        updater._layer.state.detach().clone()
-                        for updater in (*layer_group_odd, *layer_group_even)
-                    ]
+                updaters = (*layer_group_odd, *layer_group_even)
+                for sweep in range(max_num_of_iterations):
+                    # Only the final sweep's change is reported. step() assigns new state
+                    # tensors and never writes into the old ones, so references suffice.
+                    if sweep == max_num_of_iterations - 1:
+                        old_states = [updater._layer.state.detach() for updater in updaters]
                     self._step_odd_even(layer_group_odd, layer_group_even)
-                    updaters = (*layer_group_odd, *layer_group_even)
+                    self._iterations_performed += 1
+                if max_num_of_iterations:
                     self._final_max_voltage_change = max(
                         (
                             self._max_abs_delta(updater._layer.state, old_state)
@@ -1181,7 +1184,6 @@ class _EquilibriumMinimizer(Minimizer):
                         (float(state.abs().max().item()) for state in old_states),
                         default=0.0,
                     )
-                    self._iterations_performed += 1
             else:
                 for layer_group in self._list_layers:
                     old_states = [
@@ -1206,27 +1208,20 @@ class _EquilibriumMinimizer(Minimizer):
             relaxing = self._relaxation is not None
             if relaxing and not resume:
                 self._reset_relaxation()
+            layer_group_odd, layer_group_even = self._list_layers[0], self._list_layers[1]
+            updaters = (*layer_group_odd, *layer_group_even)
             for _ in range(max_num_of_iterations):
-                layer_group_odd, layer_group_even = self._list_layers[0], self._list_layers[1]
-                odd_old = [u._layer.state.detach().clone() for u in layer_group_odd]
-                even_old = [u._layer.state.detach().clone() for u in layer_group_even]
+                # step() assigns new state tensors and never writes into the old ones,
+                # so references suffice; each layer's change is formed once.
+                old_states = [u._layer.state.detach() for u in updaters]
                 self._step_odd_even(layer_group_odd, layer_group_even)
-
-                inf_delta = 0.0
-                inf_ref = 0.0
-                for updater, old_state in zip(layer_group_odd, odd_old):
-                    inf_delta = max(inf_delta, self._max_abs_delta(updater._layer.state, old_state))
-                    inf_ref = max(inf_ref, float(old_state.abs().max().item()))
-                for updater, old_state in zip(layer_group_even, even_old):
-                    inf_delta = max(inf_delta, self._max_abs_delta(updater._layer.state, old_state))
-                    inf_ref = max(inf_ref, float(old_state.abs().max().item()))
+                deltas = [u._layer.state.detach() - old for u, old in zip(updaters, old_states)]
+                inf_delta = max((float(d.abs().max()) for d in deltas), default=0.0)
+                inf_ref = max((float(old.abs().max()) for old in old_states), default=0.0)
 
                 # Updates at roundoff level carry no spectral information.
                 if relaxing and inf_delta > 64.0 * torch.finfo(torch.float64).eps * inf_ref:
-                    self._adapt_relaxation(torch.cat([
-                        (u._layer.state - old).reshape(-1).to(torch.float64)
-                        for u, old in zip((*layer_group_odd, *layer_group_even), (*odd_old, *even_old))
-                    ]))
+                    self._adapt_relaxation(torch.cat([d.reshape(-1).to(torch.float64) for d in deltas]))
 
                 self._iterations_performed += 1
                 self._final_max_voltage_change = inf_delta
@@ -1302,38 +1297,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
         if not isinstance(self._layer, NonlinearResistiveLayer):
             return -b / (2.0 * a)
 
-        width = b.shape[1]
-        reverse_mask_nodes = torch.arange(width, device=b.device) >= (width // 2)
-        reverse_mask = reverse_mask_nodes.unsqueeze(0).expand_as(b)
-        v_fwd = self.lambert_single_forward(
-            a,
-            b,
-            self._Is,
-            self._v_off,
-            self._Vt,
-            z_thresh=self._settings.z_thresh,
-            polish=self._settings.use_polish,
-            abs_tol=self._settings.single_diode_polish_abs_tol,
-            rel_tol=self._settings.single_diode_polish_rel_tol,
-            exp_clip=self._settings.exp_clip,
-            a_min=self._settings.single_diode_min_a,
-            max_inner_iter=self._settings.max_newton_iters,
-        )
-        v_rev = self.lambert_single_reverse(
-            a,
-            b,
-            self._Is,
-            self._v_off,
-            self._Vt,
-            z_thresh=self._settings.z_thresh,
-            polish=self._settings.use_polish,
-            abs_tol=self._settings.single_diode_polish_abs_tol,
-            rel_tol=self._settings.single_diode_polish_rel_tol,
-            exp_clip=self._settings.exp_clip,
-            a_min=self._settings.single_diode_min_a,
-            max_inner_iter=self._settings.max_newton_iters,
-        )
-        return torch.where(reverse_mask, v_rev, v_fwd)
+        return self._solve_layer(a, b)
 
     def lambertw_large(self, z, terms):
         L1 = torch.log(z)

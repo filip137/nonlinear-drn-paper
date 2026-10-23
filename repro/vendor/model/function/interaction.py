@@ -64,6 +64,66 @@ def build_bias_interaction(
     )
 
 
+class ZeroCoefficient:
+    """A coefficient function that is identically zero for its layer.
+
+    Called directly it returns zeros shaped like the layer's state, as before;
+    SumSeparableFunction skips it rather than adding zeros at every update.
+    """
+
+    is_zero = True
+
+    def __init__(self, layer):
+        self._layer = layer
+
+    def __call__(self):
+        return torch.zeros_like(self._layer.state)
+
+
+def cached_coefficient(cache, slot, compute, *dependencies):
+    """Return compute(), reusing the stored value while its dependencies are unchanged.
+
+    Tensor dependencies match by identity and in-place version counter, other values
+    by equality. Nothing is reused while autograd could record through a tensor
+    dependency (its graph must not be shared), nor for inference tensors, which
+    carry no version counter. Callers must not modify the returned tensor in place.
+    """
+    key = []
+    for value in dependencies:
+        if torch.is_tensor(value):
+            if value.is_inference() or (value.requires_grad and torch.is_grad_enabled()):
+                return compute()
+            key.append((value, value._version))
+        else:
+            key.append(value)
+    entry = cache.get(slot)
+    if entry is not None and all(
+        (isinstance(new, tuple) and old[0] is new[0] and old[1] == new[1])
+        or (not isinstance(new, tuple) and old == new)
+        for old, new in zip(entry[0], key)
+    ):
+        return entry[1]
+    result = compute()
+    cache[slot] = (key, result)
+    return result
+
+
+def _coefficient_sum(fns):
+    """Sum coefficient functions, skipping identically zero ones unless all are zero."""
+
+    if not fns:
+        return lambda: 0
+    terms = [fn for fn in fns if not getattr(fn, "is_zero", False)] or fns
+    first, rest = terms[0], terms[1:]
+
+    def total():
+        value = first()
+        for fn in rest:
+            value = value + fn()
+        return value
+
+    return total
+
 
 class Function(ABC):
     """Abstract class for functions
@@ -551,6 +611,7 @@ class ResistiveBiasInteraction(QFunction):
         self._voltage_amp = voltage_amp
         self._current_amp = current_amp
         self._scale_mode = scale_mode
+        self._coefficient_cache = {}
 
         QFunction.__init__(self, [layer], [bias])
 
@@ -581,7 +642,7 @@ class ResistiveBiasInteraction(QFunction):
 
     def b_coef_fn(self, layer):
         """Overrides the default implementation of QFunction."""
-        dictionary = {self._layer: self._b_coef_layer}
+        dictionary = {self._layer: ZeroCoefficient(self._layer)}
         return dictionary[layer]
 
     def grad_param_fn(self, param):
@@ -591,7 +652,8 @@ class ResistiveBiasInteraction(QFunction):
 
     def _a_coef_layer(self):
         """Returns the quadratic influence of the bias on the layer's state."""
-        return (self._bias.get() * self._scale_value()).unsqueeze(0)
+        bias, scale = self._bias.get(), self._scale_value()
+        return cached_coefficient(self._coefficient_cache, "a", lambda: (bias * scale).unsqueeze(0), bias, scale)
 
     def _b_coef_layer(self):
         """Returns zero linear influence on the layer's state."""
@@ -675,10 +737,10 @@ class HardSigmoidNonLinearInteraction(Function):
         return grad
 
     def a_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
     def b_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
 
 class LpwNonLinearInteraction(Function):
@@ -732,10 +794,10 @@ class LpwNonLinearInteraction(Function):
         return torch.cat((grad_exc, grad_inh), dim=1)
 
     def a_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
     def b_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
 
 class DoubleQuadraticNonLinearInteraction(Function):
@@ -799,10 +861,10 @@ class DoubleQuadraticNonLinearInteraction(Function):
         return grad
 
     def a_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
     def b_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
 
 class DoubleExponentialNonLinearInteraction(Function):
@@ -866,10 +928,10 @@ class DoubleExponentialNonLinearInteraction(Function):
 
 
     def a_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
     def b_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
 
 class SingleExponentialNonLinearInteraction(Function):
@@ -945,10 +1007,10 @@ class SingleExponentialNonLinearInteraction(Function):
         return grad.reshape_as(v)
 
     def a_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
     def b_coef_fn(self, layer):
-        return lambda: torch.zeros_like(self._layer.state)
+        return ZeroCoefficient(self._layer)
 
 
 class NudgingInteraction(LFunction):
@@ -1109,7 +1171,7 @@ class SumSeparableFunction(Function):
         fns = [interaction.a_coef_fn(layer) for interaction in self._interactions if layer in interaction.layers()]
         fns = [fn for fn in fns if fn]
 
-        return lambda: sum([fn() for fn in fns])
+        return _coefficient_sum(fns)
 
     def b_coef_fn(self, layer):
         """Returns a function that computes the coefficient b wrt the given layer
@@ -1125,7 +1187,7 @@ class SumSeparableFunction(Function):
 
         fns = [interaction.b_coef_fn(layer) for interaction in self._interactions if layer in interaction.layers()]
 
-        return lambda: sum([fn() for fn in fns])
+        return _coefficient_sum(fns)
 
     def a_coef_components(self, layer):
         """Return individual a-coefficient contributions for a layer."""

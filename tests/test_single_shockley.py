@@ -177,3 +177,20 @@ def test_nonfinite_coefficients_raise_explicitly():
     b=torch.tensor([[float('nan'),0.]],dtype=torch.float64)
     with pytest.raises(NonFiniteDiodeError):
         make_updater(ConfigurableExponentialSingleDiodeUpdater,a,b).pre_activate()
+
+
+@pytest.mark.parametrize('cls', CLASSES)
+@pytest.mark.parametrize('polish', [False, True])
+def test_one_pass_matches_solving_both_orientations(cls, polish):
+    # Every node is solved once in its own orientation instead of both ways.
+    a = torch.tensor([[.0005], [.5], [10.]], dtype=torch.float64)
+    b = torch.tensor([[-4000., -30., -.01, 0., .01, 30., 4000., -2., 3., .5]], dtype=torch.float64).repeat(3, 1)
+    updater = make_updater(cls, a, b, off=.8, polish=polish)
+    settings = dict(z_thresh=1e10, polish=polish, abs_tol=1e-10 if polish else None,
+                    rel_tol=1e-10 if polish else None, exp_clip=100., a_min=1e-30,
+                    max_inner_iter=32 if polish else None)
+    aa = a.expand_as(b)
+    forward = updater.lambert_single_forward(aa, b, 1e-6, .8, .05, **settings)
+    reverse = updater.lambert_single_reverse(aa, b, 1e-6, .8, .05, **settings)
+    reverse_half = torch.arange(b.shape[1]) >= b.shape[1]//2
+    torch.testing.assert_close(updater.pre_activate(), torch.where(reverse_half, reverse, forward), rtol=0, atol=1e-13)
