@@ -208,6 +208,32 @@ def _require_settings(
 _CONV_LAYER_TYPES = (ConvLayer,)
 
 
+def _kernel_operands(layer, a, b):
+    """Contiguous float64 CPU operands for a compiled kernel, or None when the torch path must run.
+
+    The kernels cover float64 CPU solves that autograd does not record; a may hold one row
+    broadcast over the batch.
+    """
+    state = layer.state
+    if not (torch.is_tensor(a) and a.dtype == b.dtype == state.dtype == torch.float64):
+        return None
+    if b.device.type != "cpu" or b.dim() != 2 or a.dim() != 2 or state.shape != b.shape:
+        return None
+    if a.shape[1] != b.shape[1] or a.shape[0] not in (1, b.shape[0]):
+        return None
+    if torch.is_grad_enabled() and (a.requires_grad or b.requires_grad or state.requires_grad):
+        return None
+    a = a.contiguous()
+    return a, (0 if a.shape[0] == 1 else a.shape[1]), b.contiguous(), state.contiguous()
+
+
+def _check_kernel(code, context):
+    if code == 1:
+        raise NonFiniteDiodeError(f"{context}: non-finite coefficient in the compiled kernel.")
+    if code == 2:
+        raise NonFiniteDiodeError(f"{context}: the compiled kernel produced a non-finite voltage.")
+
+
 class QuadraticUpdater(LayerUpdater):
     """
     Class to update a layer assuming to the function to minimize is quadratic.
@@ -614,19 +640,52 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
         self._settings = settings
         self._b_clip = settings.b_clamp
         self._lambertw = _load_lambertw_backend(settings.lambertw_backend)
+        self._compiled = None  # set by _EquilibriumMinimizer.use_compiled_kernels
 
     def pre_activate(self):
+        return self._update(1.0)
+
+    def _update(self, omega):
+        """Coordinate solve, then the relaxation v_old + omega (v - v_old)."""
         b = self._b()
-        a = self._a().expand_as(b)
+        a = self._a()
         if isinstance(self._layer, NonlinearResistiveLayer):
-            return self.lambert_hidden(
-                a, b, self._Is, self._v_off, self._Vt,
+            v = self._compiled_update(a, b, omega)
+            if v is not None:
+                return v
+            v = self.lambert_hidden(
+                a.expand_as(b), b, self._Is, self._v_off, self._Vt,
                 z_thresh=self._settings.z_thresh,
                 polish=self._settings.use_polish,
                 exp_clip=self._settings.exp_clip,
                 max_inner_iter=self._settings.max_newton_iters,
             )
-        return -b / (2.0 * a)
+        else:
+            v = -b / (2.0 * a.expand_as(b))
+        if omega == 1.0:
+            return v
+        v_old = self._layer.state
+        return v_old + omega * (v - v_old)
+
+    def _compiled_update(self, a, b, omega):
+        """lambert_hidden plus relaxation in diode_kernels.c, or None when the torch path must run."""
+        if self._compiled is None or self._work_dtype is not torch.float64:
+            return None
+        operands = _kernel_operands(self._layer, a, b)
+        if operands is None:
+            return None
+        a, a_stride, b, v_old = operands
+        s = self._settings
+        v = torch.empty_like(b)
+        code = self._compiled.double_diode_update(
+            b.shape[0], b.shape[1], a.data_ptr(), a_stride, b.data_ptr(), v_old.data_ptr(), v.data_ptr(),
+            float(self._Is), float(self._Vt), float(self._v_off),
+            self._b_clip is not None, float(self._b_clip or 0.0),
+            float(s.z_thresh), int(s.lambertw_asymptotic_terms), bool(s.use_polish), float(s.exp_clip),
+            int(s.max_newton_iters or 0), float(s.double_diode_polish_residual_tol or 0.0), float(omega),
+        )
+        _check_kernel(code, type(self).__name__)
+        return v
 
     def lambertw_large(self, z, terms):
         return self.lambertw_large_log(torch.log(z), terms)
@@ -735,6 +794,16 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         # False -> forward diode
         self._reverse_mask = diode_params.get("reverse_mask", None)
         self._orientation_signs = None
+        self._compiled = None  # set by _EquilibriumMinimizer.use_compiled_kernels
+
+    def _orientation(self, width, device):
+        """Per-node sign: +1 for the forward diodes (first half), -1 for the reversed ones."""
+        sign = self._orientation_signs
+        if sign is None or sign.shape[1] != width or sign.device != device:
+            reverse = torch.arange(width, device=device) >= (width // 2)
+            sign = torch.where(reverse, -1.0, 1.0).to(torch.float64).unsqueeze(0)
+            self._orientation_signs = sign
+        return sign
 
     def _solve_layer(self, a, b):
         """Solve every node once, in its own orientation.
@@ -743,14 +812,8 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         ones. A per-node sign (+1 forward, -1 reverse) runs both through one pass of
         the shared kernel, instead of solving every node both ways and discarding half.
         """
-        width = b.shape[1]
-        sign = self._orientation_signs
-        if sign is None or sign.shape[1] != width or sign.device != b.device:
-            reverse = torch.arange(width, device=b.device) >= (width // 2)
-            sign = torch.where(reverse, -1.0, 1.0).to(torch.float64).unsqueeze(0)
-            self._orientation_signs = sign
         return self._lambert_single_oriented(
-            a, b, self._Is, self._v_off, self._Vt, sign=sign,
+            a, b, self._Is, self._v_off, self._Vt, sign=self._orientation(b.shape[1], b.device),
             z_thresh=self._settings.z_thresh,
             polish=self._settings.use_polish,
             abs_tol=self._settings.single_diode_polish_abs_tol,
@@ -790,16 +853,50 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
             breakpoint()
 
     def pre_activate(self):
+        return self._update(1.0)
+
+    def _update(self, omega):
+        """Coordinate solve, then the relaxation v_old + omega (v - v_old)."""
         b = self._b()                     # [N, M]
-        a = self._a().expand_as(b)         # [N, M]
+        a = self._a()
+        nonlinear = isinstance(self._layer, NonlinearResistiveLayer)
+        if nonlinear:
+            v = self._compiled_update(a, b, omega)
+            if v is not None:
+                return v
+        a = a.expand_as(b)                # [N, M]
         self._debug_tensor("a", a)
         self._debug_tensor("b", b)
+        if nonlinear:
+            v = self._solve_layer(a, b)
+            self._debug_tensor("v", v)
+        else:
+            v = -b / (2.0 * a)
+        if omega == 1.0:
+            return v
+        v_old = self._layer.state
+        return v_old + omega * (v - v_old)
 
-        if not isinstance(self._layer, NonlinearResistiveLayer):
-            return -b / (2.0 * a)
-
-        v = self._solve_layer(a, b)
-        self._debug_tensor("v", v)
+    def _compiled_update(self, a, b, omega):
+        """_solve_layer plus relaxation in diode_kernels.c, or None when the torch path must run."""
+        if self._compiled is None:
+            return None
+        operands = _kernel_operands(self._layer, a, b)
+        if operands is None:
+            return None
+        a, a_stride, b, v_old = operands
+        s = self._settings
+        sign = self._orientation(b.shape[1], b.device)
+        v = torch.empty_like(b)
+        code = self._compiled.single_diode_update(
+            b.shape[0], b.shape[1], a.data_ptr(), a_stride, b.data_ptr(), sign.data_ptr(),
+            v_old.data_ptr(), v.data_ptr(), float(self._Is), float(self._Vt), float(self._v_off),
+            self._b_clip is not None, float(self._b_clip or 0.0), float(s.single_diode_min_a),
+            float(s.z_thresh), int(s.lambertw_asymptotic_terms), bool(s.use_polish),
+            float(s.single_diode_polish_abs_tol or 0.0), float(s.single_diode_polish_rel_tol or 0.0),
+            int(s.max_newton_iters or 0), float(omega),
+        )
+        _check_kernel(code, type(self).__name__)
         return v
 
 
@@ -1035,6 +1132,28 @@ class _EquilibriumMinimizer(Minimizer):
                                 agreement=agreement, step=step, stability=stability, margin=margin)
         self._reset_relaxation()
 
+    def use_compiled_kernels(self, enabled=True):
+        """Run the Shockley coordinate solves through the compiled C kernels (opt-in).
+
+        diode_kernels.c repeats the torch path's arithmetic node by node in one loop per
+        layer, with the relaxation fused, instead of about a hundred small tensor ops.
+        It is built with the system C compiler on first use (see _kernels.py) and
+        raises KernelUnavailable when that is impossible. Float64 CPU solves that
+        autograd does not record use it; anything else keeps the torch path. Results
+        match the torch path to roundoff: below the asymptotic threshold W is evaluated
+        in FP64 rather than torchlambertw's FP32, which the Newton polish removes.
+        Returns the number of updaters switched.
+        """
+        from model.resistive import _kernels
+
+        library = _kernels.load() if enabled else None
+        updaters = [updater for updater in self._updaters if hasattr(updater, "_compiled")]
+        if enabled and not updaters:
+            raise ValueError("No updater of this minimizer has a compiled kernel (Shockley updaters only).")
+        for updater in updaters:
+            updater._compiled = library
+        return len(updaters)
+
     @property
     def relaxation_factor(self):
         """Current adaptive relaxation factor, or None when each updater keeps its own."""
@@ -1254,11 +1373,7 @@ class Float32ExponentialDoubleDiodeUpdater(ExponentialDoubleDiodeUpdater):
         self._overrelaxation_factor = float(overrelaxation_factor)
 
     def pre_activate(self):
-        v = super().pre_activate()
-        omega = self._overrelaxation_factor
-        if omega == 1.0:
-            return v
-        return self._layer.state + omega * (v - self._layer.state)
+        return self._update(self._overrelaxation_factor)
 
 
 class OverRelaxedFloat64DoubleDiodeUpdater(Float64ExponentialDoubleDiodeUpdater):
@@ -1277,12 +1392,7 @@ class OverRelaxedFloat64DoubleDiodeUpdater(Float64ExponentialDoubleDiodeUpdater)
         self._overrelaxation_factor = float(overrelaxation_factor)
 
     def pre_activate(self):
-        v_cd = super().pre_activate()
-        omega = self._overrelaxation_factor
-        if omega == 1.0:
-            return v_cd
-        v_old = self._layer.state
-        return v_old + omega * (v_cd - v_old)
+        return self._update(self._overrelaxation_factor)
 
 
 class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
@@ -1290,14 +1400,6 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
 
     def __init__(self, layer, fn, diode_params, settings: MinimizerSettings):
         super().__init__(layer, fn, diode_params, settings)
-
-    def pre_activate(self):
-        b = self._b()
-        a = self._a().expand_as(b)
-        if not isinstance(self._layer, NonlinearResistiveLayer):
-            return -b / (2.0 * a)
-
-        return self._solve_layer(a, b)
 
     def lambertw_large(self, z, terms):
         L1 = torch.log(z)
@@ -1351,12 +1453,7 @@ class OverRelaxedSingleDiodeUpdater(ConfigurableExponentialSingleDiodeUpdater):
         self._overrelaxation_factor = float(overrelaxation_factor)
 
     def pre_activate(self):
-        v_cd = super().pre_activate()
-        omega = self._overrelaxation_factor
-        if omega == 1.0:
-            return v_cd
-        v_old = self._layer.state
-        return v_old + omega * (v_cd - v_old)
+        return self._update(self._overrelaxation_factor)
 
 
 class ExperimentalIVCurveUpdater(LayerUpdater):

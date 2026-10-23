@@ -219,3 +219,61 @@ def test_coordinate_update_minimizes_the_same_energy_used_in_training():
     minimum = energy_at(optimum)
     for perturbation in (-0.1, -1e-5, 1e-5, 0.1):
         assert torch.all(energy_at(optimum + perturbation) > minimum)
+
+
+from model.resistive import _kernels  # noqa: E402
+from model.resistive.minimizer import NonFiniteDiodeError  # noqa: E402
+
+compiled = pytest.mark.skipif(not _kernels.available(), reason="the compiled kernels need a C compiler")
+
+
+def _kernel_case(broadcast):
+    a = torch.tensor([[1e-6], [1e-4], [1e-2]], dtype=torch.float64)
+    c = PARAMS["I_s"] * math.exp(-PARAMS["V_off"] / PARAMS["V_t"])
+    b = torch.cat((torch.tensor([[-2*c, -0.5*c, 0., 0.5*c, 2*c]], dtype=torch.float64).expand(3, -1),
+                   -1e4*a, -6*a, -a, a, 6*a, 1e4*a), dim=1)
+    return (a[1:2].expand(1, b.shape[1]).clone() if broadcast else a.expand_as(b).clone()), b
+
+
+@compiled
+@pytest.mark.parametrize("cls,omega", [(ExponentialDoubleDiodeUpdater, 1.0), (Float64ExponentialDoubleDiodeUpdater, 1.0),
+                                       (OverRelaxedFloat64DoubleDiodeUpdater, 1.4)])
+@pytest.mark.parametrize("polish", [False, True])
+@pytest.mark.parametrize("broadcast", [False, True])
+def test_compiled_kernel_matches_the_torch_path(cls, omega, polish, broadcast):
+    a, b = _kernel_case(broadcast)
+    torch_path = _updater(cls, a, b, polish=polish, omega=omega)
+    kernel = _updater(cls, a, b, polish=polish, omega=omega)
+    kernel._compiled = _kernels.load()
+    for updater in (torch_path, kernel):
+        updater._layer.state = torch.linspace(-0.5, 0.5, b.numel(), dtype=torch.float64).reshape(b.shape)
+    expected, actual = torch_path.pre_activate(), kernel.pre_activate()
+    # Unpolished, the kernel's FP64 Lambert W is closer to the root than torchlambertw's FP32.
+    torch.testing.assert_close(actual, expected, rtol=0, atol=1e-12 if polish else 2e-7)
+    if omega == 1.0:
+        aa = a.expand_as(b)
+        reference = np.array([_bracketed_root(float(x), float(y), PARAMS) for x, y in zip(aa.flatten(), b.flatten())])
+        np.testing.assert_allclose(actual.numpy().ravel(), reference, rtol=2e-6, atol=2e-13 if polish else 2e-7)
+
+
+@compiled
+def test_compiled_kernel_rejects_non_finite_coefficients():
+    a, b = _kernel_case(False)
+    b[0, 0] = float("nan")
+    updater = _updater(Float64ExponentialDoubleDiodeUpdater, a, b, polish=True)
+    updater._compiled = _kernels.load()
+    with pytest.raises(NonFiniteDiodeError):
+        updater.pre_activate()
+
+
+@compiled
+def test_compiled_kernel_leaves_float32_work_and_autograd_to_torch():
+    a, b = _kernel_case(False)
+    float32 = _updater(Float32ExponentialDoubleDiodeUpdater, a.float(), b.float(), polish=True)
+    expected = float32.pre_activate()
+    float32._compiled = _kernels.load()
+    torch.testing.assert_close(float32.pre_activate(), expected, rtol=0, atol=0)
+    b = b.clone().requires_grad_(True)
+    recorded = _updater(Float64ExponentialDoubleDiodeUpdater, a, b, polish=True)
+    recorded._compiled = _kernels.load()
+    assert recorded.pre_activate().grad_fn is not None

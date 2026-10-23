@@ -344,6 +344,8 @@ repro/vendor/model/function/cost.py
 repro/vendor/model/function/interaction.py
 repro/vendor/model/function/network.py
 repro/vendor/model/minimizer/minimizer.py
+repro/vendor/model/resistive/_kernels.py
+repro/vendor/model/resistive/diode_kernels.c
 repro/vendor/model/resistive/interaction.py
 repro/vendor/model/resistive/layer.py
 repro/vendor/model/resistive/minimizer.py

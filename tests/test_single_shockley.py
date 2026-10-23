@@ -194,3 +194,63 @@ def test_one_pass_matches_solving_both_orientations(cls, polish):
     reverse = updater.lambert_single_reverse(aa, b, 1e-6, .8, .05, **settings)
     reverse_half = torch.arange(b.shape[1]) >= b.shape[1]//2
     torch.testing.assert_close(updater.pre_activate(), torch.where(reverse_half, reverse, forward), rtol=0, atol=1e-13)
+
+
+from model.resistive import _kernels  # noqa: E402
+
+compiled = pytest.mark.skipif(not _kernels.available(), reason='the compiled kernels need a C compiler')
+
+
+@compiled
+@pytest.mark.parametrize('cls,omega', [(ExponentialSingleDiodeUpdater, 1.), (ConfigurableExponentialSingleDiodeUpdater, 1.),
+                                       (OverRelaxedSingleDiodeUpdater, 1.4)])
+@pytest.mark.parametrize('polish', [False, True])
+@pytest.mark.parametrize('off', [0., .8])
+@pytest.mark.parametrize('Is', [1e-6, 0.])
+def test_compiled_kernel_matches_the_torch_path(cls, omega, polish, off, Is):
+    a = torch.tensor([[.0005], [.5], [10.]], dtype=torch.float64)
+    b = torch.tensor([[-4000., -30., -.01, 0., .01, 30., 4000., -2., 3., .5]], dtype=torch.float64).repeat(3, 1)
+    torch_path = make_updater(cls, a, b, off=off, Is=Is, polish=polish, omega=omega)
+    kernel = make_updater(cls, a, b, off=off, Is=Is, polish=polish, omega=omega)
+    kernel._compiled = _kernels.load()
+    for updater in (torch_path, kernel):
+        updater._layer.state = torch.linspace(-.5, .5, b.numel(), dtype=torch.float64).reshape(b.shape)
+    torch.testing.assert_close(kernel.pre_activate(), torch_path.pre_activate(), rtol=1e-13, atol=1e-12)
+
+
+@compiled
+def test_compiled_kernel_rejects_non_finite_coefficients_too():
+    a = torch.ones((1, 2), dtype=torch.float64)
+    b = torch.tensor([[float('nan'), 0.]], dtype=torch.float64)
+    updater = make_updater(ConfigurableExponentialSingleDiodeUpdater, a, b)
+    updater._compiled = _kernels.load()
+    with pytest.raises(NonFiniteDiodeError):
+        updater.pre_activate()
+
+
+@compiled
+@pytest.mark.parametrize('relaxation', [1., 1.2])
+def test_minimizer_switches_to_the_compiled_kernels(relaxation):
+    a = torch.full((1, 4), 10., dtype=torch.float64)
+    b = torch.tensor([[-4000., 30., -2., 4000.]], dtype=torch.float64)
+    states = []
+    for enabled in (False, True):
+        layer = NonlinearResistiveLayer((4,), non_linearity='single_diode_exponential')
+        layer.state = torch.zeros_like(b)
+        simulation = dict(nonlinearity='single_diode_exponential',
+            physical=dict(saturation_current=1e-6, thermal_voltage=.05, offset_voltage=.8),
+            amplification=dict(voltage_factor=1., current_factor=1.),
+            updater=dict(method='lambert_w_v1', dtype='float64', backend='torchlambertw', relaxation=relaxation,
+                         linear_coefficient_clamp=1e6, quadratic_coefficient_min=1e-30, exponent_clip=100.,
+                         asymptotic_threshold=1e10, asymptotic_terms=4, polish=False))
+        native = build_minimizer(fn=Quadratic(a, b, layer), free_layers=[layer], simulation=simulation,
+            equilibrium=dict(method='fixed_sweeps', sweeps=2, initial_state='zeros', update_order='asynchronous'),
+            repo_root=Path.cwd())
+        if enabled:
+            assert native.use_compiled_kernels() == 1
+            assert native._updaters[0]._compiled is not None
+        native.compute_equilibrium()
+        states.append(layer.state.clone())
+        if enabled:
+            assert native.use_compiled_kernels(False) == 1 and native._updaters[0]._compiled is None
+    torch.testing.assert_close(states[1], states[0], rtol=1e-13, atol=1e-12)
