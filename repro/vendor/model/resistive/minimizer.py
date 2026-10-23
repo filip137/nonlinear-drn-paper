@@ -227,6 +227,63 @@ def _kernel_operands(layer, a, b):
     return a, (0 if a.shape[0] == 1 else a.shape[1]), b.contiguous(), state.contiguous()
 
 
+def _lambertw_series(l1, terms):
+    """Asymptotic W0(z) from l1 = log(z), with 1-4 terms of the de Bruijn series."""
+    l2 = torch.log(l1)
+    w = l1 - l2
+    if terms >= 2:
+        w = w + l2 / l1
+    if terms >= 3:
+        w = w + l2 * (l2 - 2.0) / (2.0 * l1.square())
+    if terms >= 4:
+        w = w + l2 * (6.0 - 9.0 * l2 + 2.0 * l2.square()) / (6.0 * l1.pow(3))
+    return w
+
+
+def _shockley_lambertw(log_z, lambertw, *, z_thresh, terms, refine):
+    """W0(exp(log_z)) for both Shockley families, without forming an overflowing exp(log_z).
+
+    One rule for the double and the single diode (and for diode_kernels.c):
+    - log z at or below the threshold log(z_thresh), clamped to [8, FP32 limit]: the
+      torchlambertw backend evaluates W0(exp(log_z)). The lower clamp keeps the series
+      away from small z, where it is inaccurate; the upper one keeps the backend (which
+      casts even FP64 arguments to FP32) within range.
+    - above it: the asymptotic series from log_z itself.
+    - refine, when no polish follows: three Newton steps on w + log(w) = log_z bring W to
+      working precision; W = 0 (exp underflow) stays exact.
+    """
+    log_threshold = min(max(math.log(z_thresh), 8.0), math.log(torch.finfo(torch.float32).max) - 2.0)
+    large = log_z > log_threshold
+    w = torch.empty_like(log_z)
+    if not large.all():
+        w[~large] = lambertw(torch.exp(log_z[~large].to(torch.float64))).real.to(w.dtype)
+    if large.any():
+        w[large] = _lambertw_series(log_z[large], terms)
+    if refine:
+        positive = w > 0.0
+        for _ in range(3):
+            w = torch.where(positive, w - (w + torch.log(w) - log_z) * (w / (w + 1.0)), w)
+    return w
+
+
+def _shockley_root(log_z, w, linear, v_off, vt, log_prefactor):
+    """Diode voltage linear - V_t W from W0, for both Shockley families.
+
+    Whenever log_z > 0 it is rebuilt as V_off + V_t (log W - log_prefactor), which equals
+    it when W e^W = z but does not subtract nearly equal voltages.
+    """
+    return torch.where(log_z > 0.0, v_off + vt * (torch.log(w) - log_prefactor), linear - vt * w)
+
+
+def _exp_guard(dtype):
+    """Overflow guard for the polish exponent of both families.
+
+    Started at the Lambert-W root, the exponent stays near log(b_clamp / I_s), so the
+    guard never binds there; exp_clip no longer changes any solve.
+    """
+    return math.log(torch.finfo(dtype).max) - 2.0
+
+
 def _check_kernel(code, context):
     if code == 1:
         raise NonFiniteDiodeError(f"{context}: non-finite coefficient in the compiled kernel.")
@@ -681,7 +738,7 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
             b.shape[0], b.shape[1], a.data_ptr(), a_stride, b.data_ptr(), v_old.data_ptr(), v.data_ptr(),
             float(self._Is), float(self._Vt), float(self._v_off),
             self._b_clip is not None, float(self._b_clip or 0.0),
-            float(s.z_thresh), int(s.lambertw_asymptotic_terms), bool(s.use_polish), float(s.exp_clip),
+            float(s.z_thresh), int(s.lambertw_asymptotic_terms), bool(s.use_polish),
             int(s.max_newton_iters or 0), float(s.double_diode_polish_residual_tol or 0.0), float(omega),
         )
         _check_kernel(code, type(self).__name__)
@@ -692,15 +749,7 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
 
     def lambertw_large_log(self, L1, terms):
         """Asymptotic W0(z) from L1 = log(z), so z itself never has to be formed."""
-        L2 = torch.log(L1)
-        w = L1 - L2
-        if terms >= 2:
-            w += L2 / L1
-        if terms >= 3:
-            w += (L2 * (-2 + L2)) / (2 * L1**2)
-        if terms >= 4:
-            w += (L2 * (6 - 9 * L2 + 2 * L2**2)) / (6 * L1**3)
-        return w
+        return _lambertw_series(L1, terms)
 
     def lambert_hidden(self, a, b, I_s, v_off, vt, z_thresh, polish, exp_clip, max_inner_iter):
         out_dtype = a.dtype
@@ -721,40 +770,29 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
         active = drive > Is * torch.exp(-v_off / vt)
         A = drive / (2.0 * a_work)
         # Lambert-W argument in the log domain. Its exponent (A - V_off) / V_t uses the
-        # diode-free voltage A and outgrows exp_clip at high input gain; clipping it there
-        # made the clipped law's root a false fixed point. The root's own exponent, used
-        # by the polish below, stays below log(b_clamp / I_s), so exp_clip never binds there.
+        # diode-free voltage A and outgrows any clip at high input gain; clipping it there
+        # made the clipped law's root a false fixed point. exp_clip is accepted for
+        # configuration compatibility only: W, the root and the polish follow the same
+        # rules as the single diode (_shockley_lambertw, _shockley_root, _exp_guard).
         log_prefactor = torch.log(Is / (2.0 * a_work * vt))
         log_z = log_prefactor + (A - v_off) / vt
         # -inf (I_s = 0) is exact: W0(0) = 0 gives the quadratic root.
         if not torch.isfinite(log_z).all() and (active & (torch.isnan(log_z) | (log_z == math.inf))).any():
             raise NonFiniteDiodeError(f"{context} log Lambert-W argument: produced a non-finite tensor.")
 
-        # The zero branch requires neither Lambert W nor Newton refinement.
-        use_asym = active & (log_z > math.log(z_thresh))
-        small_mask = active & ~use_asym
-        W0 = torch.zeros_like(A)
-        if small_mask.any():
-            z_small = torch.exp(log_z[small_mask].to(torch.float64))
-            W0[small_mask] = self._lambertw(z_small).real.to(work_dtype)
-        if use_asym.any():
-            W0[use_asym] = self.lambertw_large_log(
-                log_z[use_asym].to(torch.float64), terms=self._settings.lambertw_asymptotic_terms,
-            ).to(work_dtype)
-
-        magnitude = torch.where(active, (A - vt * W0).clamp(min=0.0), 0.0)
-        # For large z, A - V_t W0 subtracts nearly equal voltages; W0 e^W0 = z gives the
-        # same root as V_off + V_t (log W0 - log_prefactor) without the cancellation.
-        if use_asym.any():
-            magnitude[use_asym] = v_off + vt * (torch.log(W0[use_asym]) - log_prefactor[use_asym])
+        # Whole-layer evaluation, then the zero branch by mask: cheaper than gathering the
+        # active nodes, and inactive ones only give a finite (or -inf: I_s = 0) log z.
+        w = _shockley_lambertw(log_z, self._lambertw, z_thresh=z_thresh,
+                               terms=self._settings.lambertw_asymptotic_terms, refine=not polish)
+        magnitude = torch.where(active, _shockley_root(log_z, w, A, v_off, vt, log_prefactor).clamp(min=0.0), 0.0)
         if polish and active.any():
             current_tol = self._settings.double_diode_polish_residual_tol * b_work.shape[0]
             t = magnitude[active]
             a_active = a_work[active]
             drive_active = drive[active]
+            guard = _exp_guard(work_dtype)
             for _ in range(max_inner_iter):
-                exp_arg = ((t - v_off) / vt).clamp(min=-exp_clip, max=exp_clip)
-                current = Is * torch.exp(exp_arg)
+                current = Is * torch.exp(((t - v_off) / vt).clamp(max=guard))
                 residual = 2.0 * a_active * t - drive_active + current
                 derivative = 2.0 * a_active + current / vt
                 t = (t - residual / derivative).clamp(min=0.0)
@@ -903,56 +941,15 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
     # ---------- Lambert-W helpers ----------
 
     def lambertw_large(self, z, terms):
-        L1 = torch.log(z)
-        L2 = torch.log(L1)
-        w = L1 - L2
-        if terms >= 2:
-            w = w + L2 / L1
-        if terms >= 3:
-            w = w + (L2 * (-2.0 + L2)) / (2.0 * L1**2)
-        if terms >= 4:
-            w = w + (L2 * (6.0 - 9.0*L2 + 2.0*L2**2)) / (6.0 * L1**3)
-        return w
+        return _lambertw_series(torch.log(z), terms)
 
     def _lambertw0(self, z):
         return self._lambertw(z).real
 
     def _lambertw_from_log(self, log_z, z_thresh, *, refine):
-        """Evaluate W0(exp(log_z)) without forming an overflowing exp(log_z).
-
-        The configured backend is used only within its FP32 exponent range:
-        torchlambertw currently casts even FP64 arguments to FP32. Above it, the
-        asymptotic series is evaluated from log_z itself. With refine, Newton steps
-        on w + log(w) = log_z bring either value to FP64 accuracy; with the voltage
-        polish enabled they are redundant and skipped (except for crude seeds).
-        """
-        log_threshold = min(math.log(z_thresh), math.log(torch.finfo(torch.float32).max) - 2.0)
-        large = log_z > log_threshold
-        w = torch.empty_like(log_z)
-        if not large.all():
-            w[~large] = self._lambertw0(torch.exp(log_z[~large])).to(torch.float64)
-        if large.any():
-            l = log_z[large]
-            # Near z=1 the asymptotic series is unsuitable; start from W=1 and refine.
-            crude = l < 8.0
-            refine = refine or bool(crude.any())
-            l = l.clamp_min(8.0)
-            l2 = torch.log(l)
-            value = l - l2
-            terms = self._settings.lambertw_asymptotic_terms
-            if terms >= 2:
-                value = value + l2 / l
-            if terms >= 3:
-                value = value + l2 * (l2 - 2.0) / (2.0 * l.square())
-            if terms >= 4:
-                value = value + l2 * (6.0 - 9.0*l2 + 2.0*l2.square()) / (6.0*l.pow(3))
-            w[large] = torch.where(crude, 1.0, value)
-        if refine:
-            # W(z) = 0 only when exp(log_z) underflows; those entries stay exact.
-            positive = w > 0.0
-            for _ in range(3):
-                w = torch.where(positive, w - (w + torch.log(w) - log_z) * (w / (w + 1.0)), w)
-        return w
+        """W0(exp(log_z)) by the rule shared with the double diode (_shockley_lambertw)."""
+        return _shockley_lambertw(log_z, self._lambertw, z_thresh=z_thresh,
+                                  terms=self._settings.lambertw_asymptotic_terms, refine=refine)
 
     def _lambert_single_oriented(
         self, a, b, I_s, v_off, vT, *, sign, z_thresh, polish,
@@ -977,15 +974,12 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         log_prefactor = torch.log(Is) - torch.log(diagonal) - torch.log(vt)
         log_z = log_prefactor + (linear - off) / vt
         w = self._lambertw_from_log(log_z, z_thresh, refine=not polish)
-        # Equivalent reconstruction prevents subtraction of nearly equal,
-        # enormous voltages when the finite diode voltage is close to off.
-        u = torch.where(log_z > 0.0, off + vt * (torch.log(w) - log_prefactor), linear - vt * w)
+        u = _shockley_root(log_z, w, linear, off, vt, log_prefactor)
 
         if polish:
+            guard = _exp_guard(torch.float64)
             for _ in range(max_inner_iter):
-                # Started at the Lambert-W root, the exponent stays near
-                # log(|b| / I_s); 700 only guards FP64 overflow and never binds there.
-                e = torch.exp(((u - off) / vt).clamp(max=700.0))
+                e = torch.exp(((u - off) / vt).clamp(max=guard))
                 residual = diagonal*u + oriented_b + Is*(e - 1.0)
                 derivative = diagonal + (Is/vt)*e
                 u = u - residual / derivative
@@ -1402,16 +1396,7 @@ class ConfigurableExponentialSingleDiodeUpdater(ExponentialSingleDiodeUpdater):
         super().__init__(layer, fn, diode_params, settings)
 
     def lambertw_large(self, z, terms):
-        L1 = torch.log(z)
-        L2 = torch.log(L1)
-        w = L1 - L2
-        if terms >= 2:
-            w = w + L2 / L1
-        if terms >= 3:
-            w = w + (L2 * (-2.0 + L2)) / (2.0 * L1**2)
-        if terms >= 4:
-            w = w + (L2 * (6.0 - 9.0 * L2 + 2.0 * L2**2)) / (6.0 * L1**3)
-        return w
+        return _lambertw_series(torch.log(z), terms)
 
     def _lambertw0(self, z):
         return self._lambertw(z).real

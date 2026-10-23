@@ -248,12 +248,12 @@ def test_compiled_kernel_matches_the_torch_path(cls, omega, polish, broadcast):
     for updater in (torch_path, kernel):
         updater._layer.state = torch.linspace(-0.5, 0.5, b.numel(), dtype=torch.float64).reshape(b.shape)
     expected, actual = torch_path.pre_activate(), kernel.pre_activate()
-    # Unpolished, the kernel's FP64 Lambert W is closer to the root than torchlambertw's FP32.
-    torch.testing.assert_close(actual, expected, rtol=0, atol=1e-12 if polish else 2e-7)
+    # Unpolished, both refine W to FP64 (the shared Lambert-W rule).
+    torch.testing.assert_close(actual, expected, rtol=0, atol=1e-12)
     if omega == 1.0:
         aa = a.expand_as(b)
         reference = np.array([_bracketed_root(float(x), float(y), PARAMS) for x, y in zip(aa.flatten(), b.flatten())])
-        np.testing.assert_allclose(actual.numpy().ravel(), reference, rtol=2e-6, atol=2e-13 if polish else 2e-7)
+        np.testing.assert_allclose(actual.numpy().ravel(), reference, rtol=2e-6, atol=2e-13)
 
 
 @compiled

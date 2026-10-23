@@ -34,7 +34,7 @@ def _compiler():
 
 def _declare(library):
     L, D, I, P = ctypes.c_long, ctypes.c_double, ctypes.c_int, ctypes.c_void_p
-    library.double_diode_update.argtypes = [L, L, P, L, P, P, P, D, D, D, I, D, D, I, I, D, I, D, D]
+    library.double_diode_update.argtypes = [L, L, P, L, P, P, P, D, D, D, I, D, D, I, I, I, D, D]
     library.double_diode_update.restype = I
     library.single_diode_update.argtypes = [L, L, P, L, P, P, P, P, D, D, D, I, D, D, D, I, I, D, D, I, D]
     library.single_diode_update.restype = I

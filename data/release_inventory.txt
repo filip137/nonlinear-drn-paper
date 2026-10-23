@@ -380,6 +380,7 @@ tests/test_paper_figures.py
 tests/test_replay_runtime_v2.py
 tests/test_replay_v2_data.py
 tests/test_runner.py
+tests/test_shockley_consistency.py
 tests/test_single_shockley.py
 tests/test_small_network.py
 tests/test_strict_config.py
