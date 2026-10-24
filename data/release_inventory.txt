@@ -338,6 +338,7 @@ repro/runner.py
 repro/small_network.py
 repro/strict_config.py
 repro/train.py
+repro/vendor/custom_lambert_halley/__init__.py
 repro/vendor/model/__init__.py
 repro/vendor/model/amplification.py
 repro/vendor/model/function/cost.py
@@ -369,6 +370,7 @@ tests/conftest.py
 tests/test_adaptive_relaxation.py
 tests/test_coefficient_cache.py
 tests/test_configs.py
+tests/test_custom_lambert_halley.py
 tests/test_demo.py
 tests/test_device.py
 tests/test_double_shockley.py

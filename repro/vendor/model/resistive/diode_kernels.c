@@ -38,14 +38,16 @@ static double series(double l1, int terms) {
     return w;
 }
 
-/* Principal-branch W0(z) for z >= 0: Winitzki seed, then Halley in FP64. */
+/* Principal-branch W0(z) for z >= 0, as custom_lambert_halley.lambertw: Winitzki seed
+ * (log(z) for log1p(z) above 1e6), then Halley steps divided through by e^w so they cannot
+ * overflow, until a step is within 4 ulp, at most 5 steps (4 suffice for every z). */
 static double lambertw0(double z) {
     if (z == 0.0) return 0.0;
-    double lp = log1p(z);
+    const double lp = z > 1e6 ? log(z) : log1p(z);
     double w = lp * (1.0 - log1p(lp) / (2.0 + lp));
-    for (int k = 0; k < 10; k++) {
-        double ew = exp(w), f = w * ew - z, wp1 = w + 1.0;
-        double step = f / (ew * wp1 - (w + 2.0) * f / (2.0 * wp1));
+    for (int k = 0; k < 5; k++) {
+        const double f = w - z * exp(-w), wp1 = w + 1.0;
+        const double step = f / (wp1 - (w + 2.0) * f / (2.0 * wp1));
         w -= step;
         if (!(fabs(step) > 4.0 * DBL_EPSILON * fabs(w))) break;
     }
