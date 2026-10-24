@@ -375,6 +375,7 @@ tests/test_demo.py
 tests/test_device.py
 tests/test_double_shockley.py
 tests/test_environment.py
+tests/test_fused_updates.py
 tests/test_manifest.py
 tests/test_minimizer_layout.py
 tests/test_npz_compare.py

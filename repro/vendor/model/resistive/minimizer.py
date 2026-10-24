@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import torch
 
+from custom_lambert_halley import lambertw as halley_lambertw
 from model.minimizer.minimizer import LayerUpdater, Minimizer
 from model.resistive.layer import ConvLayer, NonlinearResistiveLayer
 
@@ -282,6 +283,93 @@ def _exp_guard(dtype):
     guard never binds there; exp_clip no longer changes any solve.
     """
     return math.log(torch.finfo(dtype).max) - 2.0
+
+
+def _shockley_lambertw_fused(log_z, *, z_thresh, terms, refine):
+    """_shockley_lambertw without host synchronization.
+
+    Same rule (threshold, series, refinement); both branches are evaluated for every
+    element and selected with torch.where, and W below the threshold comes from
+    custom_lambert_halley in the working dtype instead of the FP32 torchlambertw backend.
+    """
+    log_threshold = min(max(math.log(z_thresh), 8.0), math.log(torch.finfo(torch.float32).max) - 2.0)
+    # The clamps keep the unselected branch finite: exp below the cap, the series at log z >= 8.
+    small = halley_lambertw(torch.exp(log_z.clamp(max=log_threshold)))
+    large = _lambertw_series(log_z.clamp(min=log_threshold), terms)
+    w = torch.where(log_z > log_threshold, large, small)
+    if refine:
+        positive = w > 0.0
+        for _ in range(3):
+            w = torch.where(positive, w - (w + torch.log(w) - log_z) * (w / (w + 1.0)), w)
+    return w
+
+
+def _double_diode_fused(a, b, *, Is, vt, v_off, b_clip, z_thresh, terms, polish, max_iter, tol):
+    """ExponentialDoubleDiodeUpdater.lambert_hidden, branch-free and without host synchronization.
+
+    The polish keeps each node's own tolerance: a node stops changing once its KCL residual
+    is below tol, at most max_iter steps (the configured cap).
+    """
+    if b_clip is not None:
+        b = b.clamp(min=-b_clip, max=b_clip)
+    drive = b.abs()
+    active = drive > Is * math.exp(-v_off / vt)
+    A = drive / (2.0 * a)
+    log_prefactor = torch.log(Is / (2.0 * a * vt))
+    log_z = log_prefactor + (A - v_off) / vt
+    w = _shockley_lambertw_fused(log_z, z_thresh=z_thresh, terms=terms, refine=not polish)
+    t = _shockley_root(log_z, w, A, v_off, vt, log_prefactor).clamp(min=0.0)
+    if polish:
+        guard = _exp_guard(t.dtype)
+        done = ~active
+        for _ in range(max_iter):
+            current = Is * torch.exp(((t - v_off) / vt).clamp(max=guard))
+            residual = 2.0 * a * t - drive + current
+            stepped = (t - residual / (2.0 * a + current / vt)).clamp(min=0.0)
+            t = torch.where(done, t, stepped)
+            done = done | (residual.abs() < tol)
+    return torch.where(active, -torch.sign(b) * t, 0.0)
+
+
+def _single_diode_fused(a, b, sign, *, Is, vt, v_off, b_clip, a_min, z_thresh, terms, polish,
+                        abs_tol, rel_tol, max_iter):
+    """ExponentialSingleDiodeUpdater._lambert_single_oriented, branch-free and without host
+    synchronization. The polish keeps each node's own absolute and relative tolerance,
+    at most max_iter steps (the configured cap)."""
+    diagonal = 2.0 * a.clamp_min(a_min)
+    if b_clip is not None:
+        b = b.clamp(min=-b_clip, max=b_clip)
+    if Is == 0:
+        return -b / diagonal
+    oriented_b = sign * b
+    linear = (Is - oriented_b) / diagonal
+    log_prefactor = math.log(Is) - torch.log(diagonal) - math.log(vt)
+    log_z = log_prefactor + (linear - v_off) / vt
+    w = _shockley_lambertw_fused(log_z, z_thresh=z_thresh, terms=terms, refine=not polish)
+    u = _shockley_root(log_z, w, linear, v_off, vt, log_prefactor)
+    if polish:
+        guard = _exp_guard(u.dtype)
+        done = torch.zeros_like(u, dtype=torch.bool)
+        for _ in range(max_iter):
+            e = torch.exp(((u - v_off) / vt).clamp(max=guard))
+            residual = diagonal * u + oriented_b + Is * (e - 1.0)
+            stepped = u - residual / (diagonal + (Is / vt) * e)
+            u = torch.where(done, u, stepped)
+            size = diagonal * stepped.abs() + b.abs() + Is + 1.0
+            done = done | ((residual.abs() < abs_tol) & (residual.abs() / (size + a_min) < rel_tol))
+    return sign * u
+
+
+_FUSED_COMPILED = {}
+
+
+def _fused_function(function, compile):
+    """The fused core, optionally through torch.compile (one compiled wrapper per core)."""
+    if not compile:
+        return function
+    if function not in _FUSED_COMPILED:
+        _FUSED_COMPILED[function] = torch.compile(function, fullgraph=True)
+    return _FUSED_COMPILED[function]
 
 
 def _check_kernel(code, context):
@@ -698,6 +786,7 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
         self._b_clip = settings.b_clamp
         self._lambertw = _load_lambertw_backend(settings.lambertw_backend)
         self._compiled = None  # set by _EquilibriumMinimizer.use_compiled_kernels
+        self._fused = None  # set by _EquilibriumMinimizer.use_fused_updates
 
     def pre_activate(self):
         return self._update(1.0)
@@ -706,7 +795,15 @@ class ExponentialDoubleDiodeUpdater(QuadraticUpdater):
         """Coordinate solve, then the relaxation v_old + omega (v - v_old)."""
         b = self._b()
         a = self._a()
-        if isinstance(self._layer, NonlinearResistiveLayer):
+        if isinstance(self._layer, NonlinearResistiveLayer) and self._fused is not None:
+            s, work = self._settings, self._work_dtype
+            v = self._fused(
+                a.expand_as(b).to(work), b.to(work), Is=float(self._Is), vt=float(self._Vt),
+                v_off=float(self._v_off), b_clip=None if self._b_clip is None else float(self._b_clip),
+                z_thresh=float(s.z_thresh), terms=int(s.lambertw_asymptotic_terms), polish=bool(s.use_polish),
+                max_iter=int(s.max_newton_iters or 0), tol=float(s.double_diode_polish_residual_tol or 0.0),
+            ).to(b.dtype)
+        elif isinstance(self._layer, NonlinearResistiveLayer):
             v = self._compiled_update(a, b, omega)
             if v is not None:
                 return v
@@ -833,6 +930,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         self._reverse_mask = diode_params.get("reverse_mask", None)
         self._orientation_signs = None
         self._compiled = None  # set by _EquilibriumMinimizer.use_compiled_kernels
+        self._fused = None  # set by _EquilibriumMinimizer.use_fused_updates
 
     def _orientation(self, width, device):
         """Per-node sign: +1 for the forward diodes (first half), -1 for the reversed ones."""
@@ -898,6 +996,20 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         b = self._b()                     # [N, M]
         a = self._a()
         nonlinear = isinstance(self._layer, NonlinearResistiveLayer)
+        if nonlinear and self._fused is not None:
+            s = self._settings
+            v = self._fused(
+                a.expand_as(b).to(torch.float64), b.to(torch.float64), self._orientation(b.shape[1], b.device),
+                Is=float(self._Is), vt=float(self._Vt), v_off=float(self._v_off),
+                b_clip=None if self._b_clip is None else float(self._b_clip), a_min=float(s.single_diode_min_a),
+                z_thresh=float(s.z_thresh), terms=int(s.lambertw_asymptotic_terms), polish=bool(s.use_polish),
+                abs_tol=float(s.single_diode_polish_abs_tol or 0.0), rel_tol=float(s.single_diode_polish_rel_tol or 0.0),
+                max_iter=int(s.max_newton_iters or 0),
+            ).to(b.dtype)
+            if omega == 1.0:
+                return v
+            v_old = self._layer.state
+            return v_old + omega * (v - v_old)
         if nonlinear:
             v = self._compiled_update(a, b, omega)
             if v is not None:
@@ -1101,6 +1213,7 @@ class _EquilibriumMinimizer(Minimizer):
         self._final_max_voltage_change = math.inf
         self._final_reference_scale = math.inf
         self._relaxation = None
+        self._fused_updates = False
 
     def set_adaptive_relaxation(
         self, *, estimator="two_term", initial=1.0, maximum=1.95, settle=3,
@@ -1144,9 +1257,57 @@ class _EquilibriumMinimizer(Minimizer):
         updaters = [updater for updater in self._updaters if hasattr(updater, "_compiled")]
         if enabled and not updaters:
             raise ValueError("No updater of this minimizer has a compiled kernel (Shockley updaters only).")
+        if enabled:
+            self.use_fused_updates(False)
         for updater in updaters:
             updater._compiled = library
         return len(updaters)
+
+    def use_fused_updates(self, enabled=True, *, compile=False):
+        """Run the Shockley coordinate solves as branch-free torch code without host
+        synchronization (opt-in), for batched and GPU solves.
+
+        The torch path tests data on the host (any(), early polish exits, finiteness
+        checks), so each sweep waits on the device dozens of times. The fused updates
+        (_double_diode_fused, _single_diode_fused) evaluate both Lambert-W branches and
+        select per node, and keep every tolerance per node: Halley steps for W and the
+        polish steps stop changing a node once it meets its tolerance, up to the configured
+        cap. The voltage-change stop then reads the device once per sweep, and also counts
+        non-finite voltages, which raise NonFiniteDiodeError there instead of inside an
+        update. compile=True wraps the updates in torch.compile (CPU or CUDA).
+        Results match the torch path to roundoff (W below the threshold is evaluated in
+        the working dtype by Halley rather than by torchlambertw in FP32).
+        Returns the number of updaters switched.
+        """
+        updaters = [updater for updater in self._updaters if hasattr(updater, "_fused")]
+        if enabled and not updaters:
+            raise ValueError("No updater of this minimizer has fused updates (Shockley updaters only).")
+        for updater in updaters:
+            if not enabled:
+                updater._fused = None
+                continue
+            core = _single_diode_fused if isinstance(updater, ExponentialSingleDiodeUpdater) else _double_diode_fused
+            updater._fused = _fused_function(core, compile)
+            updater._compiled = None
+        self._fused_updates = bool(enabled)
+        return len(updaters)
+
+    def _sweep_change(self, updaters, old_states):
+        """Largest voltage change and pre-sweep magnitude over the layers, read with one
+        host synchronization; with fused updates, non-finite voltages raise here."""
+        if not updaters:
+            return 0.0, 0.0
+        new_states = [u._layer.state.detach() for u in updaters]
+        values = [
+            torch.stack([(new - old).abs().amax().to(torch.float64) for new, old in zip(new_states, old_states)]).amax(),
+            torch.stack([old.abs().amax().to(torch.float64) for old in old_states]).amax(),
+        ]
+        if self._fused_updates:
+            values.append(torch.stack([(~torch.isfinite(new)).sum() for new in new_states]).sum().to(torch.float64))
+        read = torch.stack(values).tolist()
+        if self._fused_updates and read[2]:
+            raise NonFiniteDiodeError(f"{type(self).__name__}: a fused update produced non-finite voltages.")
+        return read[0], read[1]
 
     @property
     def relaxation_factor(self):
@@ -1286,17 +1447,8 @@ class _EquilibriumMinimizer(Minimizer):
                     self._step_odd_even(layer_group_odd, layer_group_even)
                     self._iterations_performed += 1
                 if max_num_of_iterations:
-                    self._final_max_voltage_change = max(
-                        (
-                            self._max_abs_delta(updater._layer.state, old_state)
-                            for updater, old_state in zip(updaters, old_states)
-                        ),
-                        default=0.0,
-                    )
-                    self._final_reference_scale = max(
-                        (float(state.abs().max().item()) for state in old_states),
-                        default=0.0,
-                    )
+                    self._final_max_voltage_change, self._final_reference_scale = self._sweep_change(
+                        updaters, old_states)
             else:
                 for layer_group in self._list_layers:
                     old_states = [
@@ -1328,13 +1480,14 @@ class _EquilibriumMinimizer(Minimizer):
                 # so references suffice; each layer's change is formed once.
                 old_states = [u._layer.state.detach() for u in updaters]
                 self._step_odd_even(layer_group_odd, layer_group_even)
-                deltas = [u._layer.state.detach() - old for u, old in zip(updaters, old_states)]
-                inf_delta = max((float(d.abs().max()) for d in deltas), default=0.0)
-                inf_ref = max((float(old.abs().max()) for old in old_states), default=0.0)
+                inf_delta, inf_ref = self._sweep_change(updaters, old_states)
 
                 # Updates at roundoff level carry no spectral information.
                 if relaxing and inf_delta > 64.0 * torch.finfo(torch.float64).eps * inf_ref:
-                    self._adapt_relaxation(torch.cat([d.reshape(-1).to(torch.float64) for d in deltas]))
+                    self._adapt_relaxation(torch.cat([
+                        (u._layer.state.detach() - old).reshape(-1).to(torch.float64)
+                        for u, old in zip(updaters, old_states)
+                    ]))
 
                 self._iterations_performed += 1
                 self._final_max_voltage_change = inf_delta

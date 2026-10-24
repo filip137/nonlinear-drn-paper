@@ -141,14 +141,15 @@ class DenseResistive(QFunction):
 
         if not _is_input_layer(self._layer_pre):
             return compute()
-        # The input layer is clamped, so its term is fixed for one input. Its state is
-        # compared by value: it may be an inference tensor, which has no version counter.
+        # The input layer is clamped, so its term is fixed for one input. set_input assigns a
+        # new state tensor, so identity (plus the version counter, which inference tensors
+        # lack) identifies the input without reading it on the host. The cache keeps that
+        # tensor alive, so its identity cannot be reused.
+        version = None if layer_pre.is_inference() else layer_pre._version
         cached = self._input_term
-        if (cached is not None and cached[0].shape == layer_pre.shape and cached[0].dtype == layer_pre.dtype
-                and cached[0].device == layer_pre.device and torch.equal(cached[0], layer_pre)):
-            return cached_coefficient(cached[1], "b_input", compute, weight, self._voltage_amp)
-        self._input_term = (layer_pre.clone(), {})
-        return cached_coefficient(self._input_term[1], "b_input", compute, weight, self._voltage_amp)
+        if cached is None or cached[0] is not layer_pre or cached[1] != version:
+            self._input_term = cached = (layer_pre, version, {})
+        return cached_coefficient(cached[2], "b_input", compute, weight, self._voltage_amp)
 
     def _a_coef_layer_post(self):
         """Returns the interaction's quadratic influence on the post-synaptic layer.

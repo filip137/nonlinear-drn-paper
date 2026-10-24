@@ -81,8 +81,13 @@ def test_input_term_follows_the_input_values():
     _, first, _, (inputs, _, _), (w1, _, _) = _stack()
     b = first._b_coef_layer_post()
     torch.testing.assert_close(b, -inputs.state @ w1.state, rtol=0, atol=0)
-    inputs._state = inputs.state.clone()  # same values, new tensor: reused
-    assert first._b_coef_layer_post() is b
+    assert first._b_coef_layer_post() is b  # unchanged input: reused
+    inputs._state = inputs.state.clone()  # a new input tensor is a new input
+    rebuilt = first._b_coef_layer_post()
+    assert rebuilt is not b
+    torch.testing.assert_close(rebuilt, b, rtol=0, atol=0)
+    inputs.state.mul_(2.0)  # in place: the version counter invalidates the term
+    torch.testing.assert_close(first._b_coef_layer_post(), -inputs.state @ w1.state, rtol=0, atol=0)
     with torch.inference_mode():  # benchmark inputs are inference tensors
         inputs.set_input(torch.full((1, 3), 0.25, dtype=torch.float64))
         torch.testing.assert_close(first._b_coef_layer_post(), -inputs.state @ w1.state, rtol=0, atol=0)
