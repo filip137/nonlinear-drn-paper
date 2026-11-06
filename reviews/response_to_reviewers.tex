@@ -1,0 +1,342 @@
+% Local working draft. All files in this directory are ignored by Git.
+% Reviewer wording is preserved from reviewer_comments.txt; only formatting changes.
+% Replace placeholders with responses and verified manuscript references.
+% Compile from this directory with: pdflatex response_to_reviewers.tex
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=25mm]{geometry}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{reviewerblue}{RGB}{0,65,125}
+\newenvironment{reviewercomment}
+  {\begin{quote}\small\color{reviewerblue}}
+  {\end{quote}}
+\newcommand{\placeholder}[1]{[#1]}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+\setlength{\emergencystretch}{2em}
+
+\title{Response to the reviewers\\[0.5em]
+\large Fast simulation of nonlinear deep resistive networks\\
+for energy-based computation}
+\author{}
+\date{Working draft}
+
+\begin{document}
+\maketitle
+
+\section*{Opening response}
+\placeholder{Add an opening response and a summary of the completed revisions.}
+
+\section*{Reviewer 1}
+\subsection*{General remarks}
+\begin{reviewercomment}
+This manuscript presents a coordinate-descent (CD) solver for nonlinear
+resistive networks with monotone nonlinear one-port elements. The central
+thesis is that the primitive of a monotone current-voltage characteristic
+is convex, as a consequence the network equilibrium can be formulated as
+minimization of an electrical pseudo-energy. For the particular devices
+they're studying the authors are able to reduce the solve step to a
+coordinate update, in turn reduced to a scalar KCL solution. There is a
+really nice trick where they apply lambert's W function and are able to
+apply this for multiple types of nonlinearities. The reported speedups
+over a commercial SPICE solver (ELDO) are very impressive!
+
+I do feel that the emperical evidence backing the paper's claims are not
+as strong as the mathematical content. As an example, the broader claim
+of employing PWL to simulate a realistic device and demonstrate practical
+scaling is not followed through on. The comparison against a
+general-purpose SPICE simulator would have benefited from greater
+analysis/isolation of confounders e.g., can we quantify how much of the
+speed up is due to coordinate descent and how much (if any) could be due
+to the use of a specialized equilibrium solver.
+
+Detailed comments below:
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R1.1}
+\begin{reviewercomment}
+1. The authors indicate their work is applicable to ``realistic devices''
+through the PWL formulation.
+
+The authors indicate that measured tabulated data and their proposed PWL
+implementation as being the primary means of leveraging their proposed
+approach. However, the strongest PWL-experiment used weas not based on
+measured devices or representative of a real device, instead it is
+generated simply by sampling the double-Shockley curve at 200 points. But
+the authors already offered an analytical solution to this, so this is
+not strong enough evidence of the capability the authors are claiming.
+
+At least one real device-derived test would considerably strengthen the
+paper, even something derived through industry/foundry compact model
+would be significantly more convincing here.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R1.2}
+\begin{reviewercomment}
+2. The double-Shockley approximation is not justified well in text.
+
+Equation (19) is an antiparallel diode equation, but the authors then
+replace it with a significantly easlier approximation. This approximation
+introduces its own error and that error is not quantified/studied. At the
+moment, it is not quite clear to me whether the baseline SPICE simulations
+use the full Eq. (19) or the approximated Eq. (21) one as their core solved
+system? If SPICE instead uses Eq. (19), this should be stated explicitly.
+In particular, it is extremely important that the Eq. (19)-to-Eq. (21)
+approximation errors be quantified.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R1.3}
+\begin{reviewercomment}
+3. What is the algorithmic benefit of coordinate descent?
+
+The authors primary result is a speedup v.s., a general-purpose commercial
+SPICE solver. However, the root cause of this speedup is not established
+in the paper. As an example, a reasonable baseline might be to solve the
+KCLs with a purpose-built Newton, damped-Newton, or related sparse solver.
+After all the authors already use Newton-Raphson for the PWL updates and
+to solve their Lambert-w formulation.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R1.4}
+\begin{reviewercomment}
+4. Depth scaling is not shown
+
+The Digits experiment only goes up to three hidden layers. The larger
+MNIST demonstration is a 1568x100x20 network with limited hidden layers.
+More crucially, the manuscript reports that netlists could not be
+generated for the larger network. However, this is surprising because
+netlist genration ought to be trivial here. More information on what is
+occurring here would help disentangle convergence issues from simply
+netlist generation? The paper motivates their work and indicates that
+deeper networks require more iterations to reach a acceptable accuracy.
+However, this work does not actually demonstrate results using even
+9-layer "tiny" models?
+\end{reviewercomment}
+
+\input{r1_4_reply.tex}
+
+\subsection*{Comment R1.5}
+\begin{reviewercomment}
+5. The reported SPICE netlist-generation failures require explanation.
+
+The manuscript states that SPICE netlists could not be generated for the
+two-hidden-layer width-1024 networks. This is surprising! Please identify
+exactly which stage failed.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R1.6}
+\begin{reviewercomment}
+6. The implemented Lambert-W update is not as \emph{straightforward} as the
+text seems to imply.
+
+The supplementary material explains that Lambert-W arguments are clipped
+for numerical stability and the resulting estimate is refined with Newton
+iterations. More importantly, the Newton residual itself appears to
+evaluate a clipped exponential.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R1.7}
+\begin{reviewercomment}
+7. Error characterization should better expose the difficult cases.
+
+The main text emphasizes the P90 relative L1 error. The supplementary
+material does provide P50, P90, and P99 statistics, and most configurations
+show excellent agreement. However, some cases exhibit a noticeably larger
+tail; for example, one three-hidden-layer single-Shockley configuration.
+
+Since the SPICE-levels of accuracy is a primary contribution of this
+paper, it would be helpful to capture tail-error characterization into
+the main text.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R1.8}
+\begin{reviewercomment}
+8. The mathematical presentation can be made considerably more accessible.
+
+The mathematical exposition could be made much more straightfoward.
+Figure 1 should appear before or alongside the general set notation and
+should annotate the free/clamped nodes, conductances, nonlinear shunts,
+and current directions used in the equations.
+
+It would also help to motivate early on why certain approximations are
+being made, before making them. Specific example would be to signpost
+that a nondecreasing current law is being studied due to the
+energy-formulation which will subsequently be discussed.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\clearpage
+\section*{Reviewer 2}
+\subsection*{General remarks}
+\begin{reviewercomment}
+\textbf{Summary}
+
+This paper proposes a fast solver for nonlinear deep neural network (DNN)
+models that predicts computing-array characteristics and integrates the
+solver into the PyTorch framework. The approach aims to enable efficient
+array-level modeling for hardware-aware DNN evaluation.
+
+\textbf{Strengths}
+
+\begin{itemize}
+
+\item Detailed modeling: The paper provides a detailed and comprehensive
+treatment of the target problem and the considered device/array behavior.
+
+\item PyTorch integration: Integration with PyTorch is useful for
+incorporating array-level effects into DNN evaluation and design
+exploration.
+
+\item Fast solver: The focus on computational efficiency is valuable for
+reducing the cost of detailed array-level simulation.
+
+\end{itemize}
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Weaknesses}
+
+\subsection*{Comment R2.1}
+\begin{reviewercomment}
+1. Limited scope: The approach appears narrowly tailored to a specific
+type of device. The authors should discuss how readily the methodology
+can be extended to other device technologies and array architectures.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R2.2}
+\begin{reviewercomment}
+2. Insufficient array-level details: More information is needed on the
+considered array architecture, including array size, device/resistance
+values, weight storage and mapping, input/output representation, and how
+computation and readout are performed. These details are important for
+assessing the practical relevance of the proposed modeling approach.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R2.3}
+\begin{reviewercomment}
+3. Limited workload evaluation: The evaluation appears to focus primarily
+on MNIST. The authors should demonstrate the scalability of the approach
+using more complex DNN workloads and report how runtime and accuracy
+scale with array and model size.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R2.4}
+\begin{reviewercomment}
+4. Incomplete discussion of prior work: The paper should discuss relevant
+prior work, including GENIEx (Chakraborty et al, DAC 2020) and TWINN
+(Malhotra et al, TCAS\_I, 2025), as well as other device/crossbar modeling
+approaches. The authors should clearly distinguish the proposed approach
+from these existing methods in terms of modeling methodology, accuracy,
+computational cost, and scope.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Comment R2.5}
+\begin{reviewercomment}
+5. Limited quantitative comparison: A quantitative comparison with
+relevant prior approaches would help establish the advantages and
+novelty of the proposed solver.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\subsection*{Overall assessment}
+\begin{reviewercomment}
+The paper presents a useful and detailed approach for fast nonlinear
+array modeling, with the PyTorch integration being particularly useful
+for DNN evaluation. However, the current scope and evaluation appear
+limited. Additional array-level details, evaluation on more complex
+workloads, and a stronger comparison with prior work would strengthen
+the paper and better establish its generality and practical applicability.
+\end{reviewercomment}
+
+\noindent\textbf{Response:}
+\placeholder{To be drafted.}
+
+\noindent\textbf{Changes to the manuscript:}
+\placeholder{Describe the revision and give its section, page, line, or figure reference, as applicable.}
+
+\end{document}
