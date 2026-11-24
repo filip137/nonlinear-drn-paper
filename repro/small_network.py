@@ -38,6 +38,7 @@ class SmallNetworkResult:
     sweeps: int
     final_max_voltage_change: float
     receipt: dict[str, Any]
+    final_max_current_residual: float | None = None
 
 
 def make_input_voltage_sweep(
@@ -129,9 +130,15 @@ def simulate_small_network(
     config: Mapping[str, Any] | str | Path,
     *,
     repo_root: Path = PACK_ROOT,
+    solver: str = "config",
+    vol_tol: float | None = None,
+    cur_tol: float | None = None,
 ) -> SmallNetworkResult:
-    """Settle a network using only its complete v2 configuration."""
+    """Settle a network with its configured minimizer, FastCD, or TorchCD."""
 
+    for name, value in (("vol_tol", vol_tol), ("cur_tol", cur_tol)):
+        if value is not None and _validate_finite_float(value, name) <= 0:
+            raise ValueError(f"{name} must be positive.")
     root = repo_root.expanduser().resolve()
     source_path: Path | None = None
     source_sha256: str | None = None
@@ -170,7 +177,7 @@ def simulate_small_network(
         )
     device = apply_execution_profile(execution)
     seed_from_config(network_config["seed"], execution)
-    numpy_dtype = _DTYPES[state_dtype]
+    numpy_dtype = _DTYPES[state_dtype] if solver == "config" else np.float64
 
     family = simulation["nonlinearity"]
     sizes = _validate_layer_sizes(network_config["layer_sizes"], family)
@@ -185,49 +192,38 @@ def simulate_small_network(
         dtype=numpy_dtype,
     )
 
-    energy_fn, network = _build_network(
-        sizes=sizes,
-        matrices=matrices,
-        inputs=inputs,
-        input_gain=network_config["input_gain"],
-        input_encoding=network_config["input_encoding"],
-        bias_method=network_config["bias"]["method"],
-        simulation=simulation,
-        device=device,
-    )
-    _ensure_vendor_path(root)
-    from repro.minimizer_factory import build_minimizer, simulation_assets
+    from repro.minimizer_factory import simulation_assets
 
-    minimizer = build_minimizer(
-        fn=energy_fn,
-        free_layers=network.free_layers(),
-        simulation=simulation,
-        equilibrium=equilibrium,
-        repo_root=root,
-    )
-    minimizer.compute_equilibrium()
-    _raise_for_non_finite_states(network.free_layers())
+    current_circuit = None
+    if cur_tol is not None:
+        if family == "experimental":
+            from repro.iv_data import load_iv_data
+            from repro.solvers import LayeredDRN, TableLaw
 
-    sweeps = minimizer.iterations_performed
-    final_delta = minimizer.final_max_voltage_change
-    if equilibrium["method"] == "voltage_change":
-        threshold = (
-            equilibrium["relative_tolerance"] * minimizer.final_reference_scale
-            + equilibrium["absolute_tolerance"]
+            curve = simulation_assets(simulation, repo_root=root)["iv_curve"]
+            current, voltage = load_iv_data(curve).numpy()
+            law = TableLaw(voltage, current, np.zeros(sum(sizes[1:-1]), dtype=int))
+            gains = simulation["amplification"]
+            current_circuit = LayeredDRN(matrices, law, gains["voltage_factor"], gains["current_factor"])
+        else:
+            from repro.solvers.torch_cd import shockley_circuit
+
+            current_circuit = shockley_circuit(matrices, simulation)
+    if solver == "config":
+        free_states, converged, sweeps, final_delta = _solve_configured(
+            sizes, matrices, inputs, network_config, simulation, equilibrium, device, root,
+            vol_tol, cur_tol, current_circuit,
         )
-        converged: bool | None = final_delta <= threshold
-        if not converged:
-            raise RuntimeError(
-                "Small-network equilibrium exhausted max_sweeps without satisfying "
-                f"the configured voltage-change criterion: delta={final_delta}, "
-                f"threshold={threshold}."
-            )
     else:
-        converged = None
-
-    free_states = tuple(
-        layer.state.detach().cpu().numpy().copy() for layer in network.free_layers()
-    )
+        free_states, sweeps, final_delta = _solve_selected_cd(
+            solver, matrices, inputs * network_config["input_gain"],
+            simulation, equilibrium, device, vol_tol, cur_tol, current_circuit,
+        )
+        converged = True
+    residual = None
+    if current_circuit is not None:
+        forcing = current_circuit.forcing(inputs * network_config["input_gain"])
+        residual = float(np.abs(current_circuit.residual(np.concatenate(free_states, axis=1), forcing)).max())
     receipt = build_run_receipt(
         repo_root=root,
         resolved_config=document,
@@ -237,6 +233,10 @@ def simulate_small_network(
         source_documents=source_documents,
         data_fingerprint=sha256_arrays(inputs, *matrices),
         extra={
+            "solver": solver,
+            "vol_tol": vol_tol,
+            "cur_tol": cur_tol,
+            "final_max_current_residual": residual,
             "equilibrium_sweeps": sweeps,
             "final_max_voltage_change": final_delta,
             "converged": converged,
@@ -249,7 +249,133 @@ def simulate_small_network(
         sweeps=sweeps,
         final_max_voltage_change=final_delta,
         receipt=receipt,
+        final_max_current_residual=residual,
     )
+
+
+def _solve_configured(sizes, matrices, inputs, network_config, simulation, equilibrium, device, root,
+                      vol_tol, cur_tol, current_circuit):
+    energy_fn, network = _build_network(
+        sizes=sizes,
+        matrices=matrices,
+        inputs=inputs,
+        input_gain=network_config["input_gain"],
+        input_encoding=network_config["input_encoding"],
+        bias_method=network_config["bias"]["method"],
+        simulation=simulation,
+        device=device,
+    )
+    from repro.minimizer_factory import build_minimizer
+
+    custom_stop = vol_tol is not None or cur_tol is not None
+    budget = equilibrium.get("max_sweeps", equilibrium.get("sweeps"))
+    settings = equilibrium
+    if custom_stop:
+        settings = dict(method="fixed_sweeps", sweeps=1, update_order=equilibrium["update_order"])
+    minimizer = build_minimizer(
+        fn=energy_fn,
+        free_layers=network.free_layers(),
+        simulation=simulation,
+        equilibrium=settings,
+        repo_root=root,
+    )
+    if custom_stop:
+        forcing = current_circuit.forcing(inputs * network_config["input_gain"]) if cur_tol is not None else None
+        for sweeps in range(1, budget + 1):
+            minimizer.compute_equilibrium(resume=sweeps > 1)
+            final_delta = minimizer.final_max_voltage_change
+            if vol_tol is not None and final_delta > vol_tol:
+                continue
+            if cur_tol is not None:
+                state = np.concatenate([layer.state.detach().cpu().numpy() for layer in network.free_layers()], axis=1)
+                if not np.all(np.abs(current_circuit.residual(state, forcing)) <= cur_tol):
+                    continue
+            break
+        else:
+            raise RuntimeError(f"Configured minimizer exhausted {budget} sweeps before meeting the requested tolerances.")
+    else:
+        minimizer.compute_equilibrium()
+    _raise_for_non_finite_states(network.free_layers())
+
+    if not custom_stop:
+        sweeps = minimizer.iterations_performed
+    final_delta = minimizer.final_max_voltage_change
+    if custom_stop:
+        converged = True
+    elif equilibrium["method"] == "voltage_change":
+        threshold = (
+            equilibrium["relative_tolerance"] * minimizer.final_reference_scale
+            + equilibrium["absolute_tolerance"]
+        )
+        converged = final_delta <= threshold
+        if not converged:
+            raise RuntimeError(
+                "Small-network equilibrium exhausted max_sweeps without satisfying "
+                f"the configured voltage-change criterion: delta={final_delta}, "
+                f"threshold={threshold}."
+            )
+    else:
+        converged = None
+
+    free_states = tuple(
+        layer.state.detach().cpu().numpy().copy() for layer in network.free_layers()
+    )
+    return free_states, converged, sweeps, final_delta
+
+
+def _solve_selected_cd(solver, matrices, inputs, simulation, equilibrium, device, vol_tol, cur_tol, current_circuit):
+    from repro.solvers import AdaptiveRelaxation, FastCD, TorchCD
+
+    laws = {"single_diode_exponential": "single", "double_diode_exponential": "double"}
+    law = laws.get(simulation["nonlinearity"])
+    if solver not in ("fast_cd", "torch_cd"):
+        raise ValueError(f"Unknown small-network solver: {solver!r}")
+    if law is None or device.type != "cpu":
+        raise ValueError(f"{solver} requires a CPU Shockley config.")
+    weights = [matrix.astype(np.float64, copy=False) for matrix in matrices]
+    custom_stop = vol_tol is not None or cur_tol is not None
+    if equilibrium["method"] == "fixed_sweeps" and not custom_stop:
+        raise ValueError(f"{solver} requires a voltage-change sweep budget or an explicit tolerance.")
+    max_sweeps = equilibrium.get("max_sweeps", equilibrium.get("sweeps"))
+    if solver == "fast_cd":
+        gains = simulation["amplification"]
+        cd = FastCD(weights, law, gains["voltage_factor"], gains["current_factor"],
+                    physical=simulation["physical"])
+    else:
+        cd = TorchCD(weights, simulation)
+
+    states = []
+    max_count = 0
+    max_delta = 0.0
+    for index, row in enumerate(inputs):
+        if solver == "fast_cd":
+            forcing = current_circuit.forcing(row) if cur_tol is not None else None
+
+            def stop(state, change):
+                if vol_tol is not None and change > vol_tol:
+                    return False
+                return cur_tol is None or np.all(np.abs(current_circuit.residual(state, forcing)) <= cur_tol)
+
+            count = cd.solve(row @ weights[0], AdaptiveRelaxation(),
+                             rtol=equilibrium.get("relative_tolerance", 0.0),
+                             atol=equilibrium.get("absolute_tolerance", 0.0), max_sweeps=max_sweeps,
+                             stop=stop if custom_stop else None)
+            state, delta = cd.state, cd.final_max_voltage_change
+            converged, reason = cd.converged, cd.reason
+        else:
+            result = cd.solve(row, tolerance=cur_tol if custom_stop else 1e-9,
+                              vol_tol=vol_tol, max_sweeps=max_sweeps)
+            state, count = result.voltages, result.iterations
+            delta = cd.minimizer.final_max_voltage_change if count else 0.0
+            converged, reason = result.converged, result.reason
+        if not converged:
+            raise RuntimeError(f"{solver} failed for input row {index} after {count} sweeps: {reason}")
+        states.append(state.copy())
+        max_count = max(max_count, count)
+        max_delta = max(max_delta, delta)
+
+    boundaries = np.cumsum([matrix.shape[1] for matrix in weights[:-1]])
+    return tuple(np.split(np.stack(states), boundaries, axis=1)), max_count, max_delta
 
 
 def _relative_or_absolute(path: Path, root: Path) -> str:

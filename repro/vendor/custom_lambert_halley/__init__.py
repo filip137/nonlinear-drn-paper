@@ -30,7 +30,7 @@ def winitzki(z):
     float64), so log(1 + z) is taken as log(z) above 1e6, where the two agree to far better
     than a starting point needs.
     """
-    lp = torch.where(z > 1e6, torch.log(z), torch.log1p(z.clamp(max=1e6)))
+    lp = torch.where(z > 1e6, torch.log(z.clamp_min(torch.finfo(z.dtype).tiny)), torch.log1p(z.clamp(max=1e6)))
     return lp * (1.0 - torch.log1p(lp) / (2.0 + lp))
 
 

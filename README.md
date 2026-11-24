@@ -1,48 +1,42 @@
-# Nonlinear DRN paper
+# Fast simulation of nonlinear deep resistive networks for energy-based computation
 
-This repository contains the code and data needed to train models and
-reproduce the results in **“Fast simulation of nonlinear deep resistive
-networks for energy-based computation.”**
+Use this repository to simulate and train deep resistive networks (DRNs) and
+reproduce the paper’s results with the included code and data.
 
-It supports the three device families evaluated in the paper:
+The simulator supports three non-linearities described in the paper:
 
-- single Shockley diode (`single_diode_exponential`);
-- antiparallel double Shockley diode (`double_diode_exponential`); and
-- measured piecewise-linear I–V data (`experimental`).
+- Single Shockley diode (`single_diode_exponential`)
+- Double Shockley diode (`double_diode_exponential`)
+- Piecewise-linear approximation of the measured MOSFET I–V curve (`experimental`)
 
-The artifact can regenerate every data-driven paper asset from bundled curated
-inputs, replay selected Digits networks with coordinate descent and compare
-their node voltages against bundled SPICE reference states, train dense DRNs
-with equilibrium propagation, and settle a hand-specified physical network.
+We implemented two coordinate-descent (CD) solvers:
+
+- `FastCD` uses compiled C kernels.
+- `TorchCD` uses PyTorch.
+
+With this repository, you can:
+
+- Define an electrical network and compute its steady-state voltages.
+- Train DRNs using EqProp.
 
 ## Prerequisites
 
-- Git, including for installation of the pinned Lambert-W dependency.
-- Python 3.12 or 3.13 with `venv` and `pip`. Python 3.12 is the paper reference
-  environment; Python 3.13 has a separately pinned compatible stack and can
-  exhibit small numerical differences.
-- A CPU for verification, plotting, Digits replay, and short training runs.
-  An NVIDIA GPU is recommended for full MNIST training.
-
-The source and bundled artifacts are self-contained; no parent checkout or
-manual `PYTHONPATH` is needed. Dependency installation requires internet
-access. MNIST is downloaded only when `--download` is explicitly supplied.
+- **Python 3.12 or 3.13** with `venv` and `pip`. Use Python 3.12 to reproduce the paper’s reference results.
+- **Git** to clone the repository and install the pinned Lambert-W dependency.
 
 ## Clone and install
 
-Use Python 3.12 to reproduce the paper's reference numerical results.
-
-First, clone the repository and create a local virtual environment:
+Clone the repository and create a virtual environment:
 
 ```bash
 git clone https://github.com/filip137/nonlinear-drn-paper.git
 cd nonlinear-drn-paper
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
 
-Then install **one** of the following dependency sets.
+Choose the CPU or NVIDIA GPU instructions below.
 
 ### CPU
 
@@ -58,65 +52,37 @@ python -m pip install -r requirements-cuda.txt
 python scripts/reproduce.py verify --device cuda
 ```
 
-`verify` checks the installed scientific packages and the integrity of the
-bundled inputs. With `--device cuda`, it also checks that PyTorch can initialize
-CUDA. CUDA runs fail explicitly instead of silently falling back to CPU.
-
-The requirement files select matched versions automatically: PyTorch
-2.5.1/Torchvision 0.20.1 for Python 3.12, or PyTorch 2.6.0/Torchvision 0.21.0
-for Python 3.13.
-
 ## Quick demo: simulate a small network
 
-Use `simulate_small_network` to simulate a toy network defined directly in
-JSON. The user provides the conductance matrices, input voltages, and diode
-parameters; no training is done and the function simply sweeps through the
-input voltages. Start from the editable example and run:
+Use `simulate_small_network` to simulate a toy network defined in
+[configs/small_network/example.json](configs/small_network/example.json).
+You provide the conductance matrices, input voltages, and diode parameters.
+Start from the editable example and run:
 
 ```bash
 python scripts/small_network.py \
-  --config configs/small_network/example.json
+  --config configs/small_network/example.json \
+  --solver fast_cd --vol_tol 1e-8
 ```
 
-The command prints the settled hidden and output voltages together with the
-convergence information.
+Choose `fast_cd` or `torch_cd` with `--solver`. Use `--vol_tol` for the maximum
+node-voltage change per sweep (V) or `--cur_tol` for the maximum node current imbalance (A).
 
-## Train a model
+### Compare against ngspice
 
-### Digits on CPU
-
-Train the bundled double-Shockley Digits configuration on its referenced CPU
-execution profile:
+With `ngspice` on your `PATH`, add `--compare-ngspice` to the command:
 
 ```bash
-python scripts/train_drn.py \
-  --config configs/train/digits_double_shockley.json
+python scripts/small_network.py --solver torch_cd --vol_tol 1e-8 --cur_tol 1e-9 --compare-ngspice
 ```
 
-For a short training run, first generate a complete snapshot with explicit
-overrides, then run that snapshot:
+ngspice computes an independent DC operating point for each input. The command
+reports the RMS voltage difference across all inputs and free nodes, then shows
+the input, node, and two voltages with the largest absolute difference.
 
-```bash
-mkdir -p configs/local
-python scripts/train_drn.py \
-  --config configs/train/digits_double_shockley.json \
-  --override '/training/epochs=10' \
-  --override '/equilibrium/sweeps=4' \
-  --write-config configs/local/digits_double_short_training_run.json
+## Train on MNIST
 
-python scripts/train_drn.py \
-  --config configs/local/digits_double_short_training_run.json
-```
-
-Each override is `JSON_POINTER=JSON_VALUE`; the value is parsed as JSON, so
-strings need JSON quotes. Targets must already exist, and duplicate,
-overlapping, unknown, or schema-invalid changes are rejected. The generated
-snapshot records every change under `provenance.generation_overrides`.
-
-### MNIST on CUDA
-
-Run the [audited DRN-XS configuration](configs/train/mnist_paper_double_shockley.json),
-which already references the deterministic CUDA profile:
+To train the model on MNIST, run:
 
 ```bash
 python scripts/train_drn.py \
@@ -124,90 +90,7 @@ python scripts/train_drn.py \
   --download
 ```
 
-The config fixes the dataset, architecture, training protocol, solver, and CUDA
-execution settings. `--download` only permits torchvision to fetch MNIST.
-
-This is the only audited MNIST paper configuration. See the
-[MNIST reproduction notes](docs/MNIST_REPRODUCTION.md) for the reported
-aggregate and original-seed limitation.
-
-## Use a custom measured I–V curve
-
-Put the NPZ file inside the repository and pass its path directly—no checksum
-or simulator-profile copy is needed:
-
-```bash
-python scripts/train_drn.py \
-  --config configs/train/default_custom_iv.json \
-  --iv-curve configs/local/my_curve.npz
-```
-
-Use `default_mnist_custom_iv.json` instead for MNIST. See
-[Adding a nonlinearity](docs/ADDING_NONLINEARITY.md) for the accepted array
-formats and numerical-policy details.
-
-## Reproduce the scientific results
-
-The following commands progress from a quick checkpoint evaluation to the
-complete numerical replay. They use the bundled inputs and do not retrain a
-model.
-
-### Evaluate a bundled checkpoint
-
-Evaluate the one-hidden-layer, width-64 double-Shockley checkpoint on the
-complete held-out Digits split:
-
-```bash
-python scripts/reproduce.py demo
-```
-
-The demo prints 95.0% accuracy on supported reference environments. The
-manifest fixes the job, batch size, assets, solver snapshot, and execution
-profile. No dataset is downloaded and no files are written.
-
-### Regenerate the paper figures
-
-Regenerate every data-driven manuscript asset from bundled inputs:
-
-```bash
-python scripts/reproduce.py figures
-```
-
-Outputs use the manuscript's relative paths under `outputs/paper/`. Checked
-files under `paper/reference/` are comparison targets, not plot inputs. To
-regenerate only the two MNIST panels, run:
-
-```bash
-python scripts/reproduce.py mnist-figures
-```
-
-### Replay the numerical results
-
-Choose either the quick spot check or the complete replay below. Validation
-jobs require new or empty output directories so stale artifacts cannot be
-reused.
-
-For the spot check, list the 195 manifest jobs, run one CPU validation, and
-compare it with its bundled SPICE reference:
-
-```bash
-python scripts/reproduce.py list
-python scripts/reproduce.py validate --group timing --limit 1
-python scripts/reproduce.py compare --group timing --limit 1
-```
-
-Alternatively, with no existing validation outputs, run the complete manifest
-with:
-
-```bash
-python scripts/reproduce.py all
-```
-
-The manifest references the deterministic CPU execution profile by path and
-hash. It also fixes each base configuration, checkpoint, optional SPICE state,
-and job-specific equilibrium override. Wall-clock plots use bundled
-measurements because timings are machine-dependent. SPICE netlist generation
-is outside this artifact; the required reference arrays are included.
+The training configuration is stored in [configs/train/mnist_paper_double_shockley.json](configs/train/mnist_paper_double_shockley.json).
 
 ## Acknowledgments and provenance
 

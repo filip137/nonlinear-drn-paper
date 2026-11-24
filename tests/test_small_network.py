@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -302,3 +303,43 @@ def test_example_script_writes_complete_generated_sweep_config(tmp_path: Path) -
     assert payload["provenance"]["generation_overrides"][0]["pointer"] == (
         "/network/input_voltages"
     )
+
+@pytest.mark.skipif(shutil.which("ngspice") is None, reason="requires ngspice")
+@pytest.mark.parametrize("family", ["single_diode_exponential", "double_diode_exponential"])
+def test_ngspice_matches_shockley_node_voltages(family):
+    from repro.ngspice import ngspice_voltages
+
+    document = _config(family)
+    document["network"]["input_gain"] = 1.3
+    document["simulation"]["amplification"]["current_factor"] = 0.7
+    document["simulation"]["physical"]["offset_voltage"] = 0.1
+    from repro.solvers.torch_cd import shockley_circuit
+
+    network = document["network"]
+    circuit = shockley_circuit(network["conductances"], document["simulation"])
+    inputs = np.asarray(network["input_voltages"]) * network["input_gain"]
+    for state, forcing in zip(ngspice_voltages(document), circuit.forcing(inputs), strict=True):
+        np.testing.assert_allclose(circuit.residual(state, forcing), 0.0, atol=1e-10)
+
+
+@pytest.mark.parametrize("tolerances", [
+    {"vol_tol": 1e-8},
+    {"cur_tol": 1e-9},
+    {"vol_tol": 1e-4, "cur_tol": 1e-9},
+    {"vol_tol": 1e-8, "cur_tol": 1e-4},
+])
+def test_cd_solvers_share_explicit_stopping_rules(tolerances, tmp_path, monkeypatch):
+    monkeypatch.setenv("DRN_KERNEL_CACHE", str(tmp_path))
+    fast, torch_cd = [
+        simulate_small_network(EXAMPLE, solver=solver, **tolerances)
+        for solver in ("fast_cd", "torch_cd")
+    ]
+    assert fast.sweeps == torch_cd.sweeps
+    for result in (fast, torch_cd):
+        if "vol_tol" in tolerances:
+            assert result.final_max_voltage_change <= tolerances["vol_tol"]
+        if "cur_tol" in tolerances:
+            assert result.final_max_current_residual <= tolerances["cur_tol"]
+    for left, right in zip((*fast.hidden_voltages, fast.output_voltages),
+                           (*torch_cd.hidden_voltages, torch_cd.output_voltages), strict=True):
+        np.testing.assert_allclose(left, right, atol=1e-13, rtol=0)

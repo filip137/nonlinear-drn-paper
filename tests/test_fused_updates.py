@@ -171,3 +171,28 @@ def test_fused_updates_on_cuda_match_cpu(family, cls, core):
     gpu._layer.state = gpu._layer.state.cuda()
     gpu._fused = getattr(module, core)
     torch.testing.assert_close(gpu.pre_activate().cpu(), cpu.pre_activate(), rtol=1e-13, atol=1e-13)
+
+
+@pytest.mark.parametrize("polish", [False, True])
+def test_fused_single_diode_gradients_survive_reverse_underflow(polish):
+    a = torch.ones((1, 4), dtype=torch.float64, requires_grad=True)
+    b = torch.tensor([[-100., 0., 100., 1.]], dtype=torch.float64, requires_grad=True)
+    v = module._single_diode_fused(a, b, 1., Is=1e-6, vt=.025, v_off=0.,
+        b_clip=None, a_min=1e-30, z_thresh=1e10, terms=4, polish=polish,
+        abs_tol=1e-10, rel_tol=1e-10, max_iter=8)
+    ga, gb = torch.autograd.grad(v.sum(), (a, b))
+    slope = 2*a.detach()+1e-6/.025*torch.exp(v.detach()/.025)
+    torch.testing.assert_close(gb, -1/slope, rtol=1e-10, atol=1e-10)
+    torch.testing.assert_close(ga, -2*v.detach()/slope, rtol=1e-10, atol=1e-10)
+
+
+def test_fused_single_diode_broadcasts_channel_orientation_over_space():
+    b = torch.ones((2, 4, 3, 5), dtype=torch.float64)
+    a = torch.ones_like(b)
+    updater = _updater(ExponentialSingleDiodeUpdater, a, b, _settings(True), "single")
+    updater._fused = module._single_diode_fused
+    v = updater.pre_activate()
+    assert v.shape == b.shape
+    sign = torch.tensor([1.,1.,-1.,-1.],dtype=b.dtype).reshape(1,4,1,1)
+    residual = 2*a*v+b+sign*PARAMS["I_s"]*torch.expm1((sign*v-PARAMS["V_off"])/PARAMS["V_t"])
+    torch.testing.assert_close(residual, torch.zeros_like(residual), atol=1e-11, rtol=0)

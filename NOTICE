@@ -29,3 +29,11 @@ changes are copyright (c) 2026 Filip Osana.
 
 This acknowledgment describes provenance and does not alter the permissions or
 conditions of the MIT License.
+
+Revision solver implementations
+-------------------------------
+The array-based CPU solvers in repro/solvers were ported from the paper review
+experiments: FastCD and its Lambert-W C kernels, dense/block Newton, cached
+block Newton, and measured-table coordinate descent. The original coordinate-
+descent provenance and MIT license above also apply to this extension. See
+docs/SOLVERS.md for numerical policies and the source mapping.

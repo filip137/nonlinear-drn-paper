@@ -36,6 +36,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Generate Cartesian input rows in a new complete config before running.",
     )
+    parser.add_argument("--solver", choices=("config", "fast_cd", "torch_cd"), default="config",
+                        help="Use the configured minimizer (default), FastCD, or TorchCD.")
+    parser.add_argument("--vol-tol", "--vol_tol", type=float, metavar="V",
+                        help="Maximum absolute node-voltage change per sweep (V).")
+    parser.add_argument("--cur-tol", "--cur_tol", type=float, metavar="A",
+                        help="Maximum absolute node current imbalance (A).")
+    parser.add_argument("--compare-ngspice", action="store_true",
+                        help="Compare each Shockley operating point with ngspice.")
     parser.add_argument("--sweep-min", type=float)
     parser.add_argument("--sweep-max", type=float)
     parser.add_argument("--sweep-points", type=int)
@@ -103,7 +111,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_config = generated
         print(f"generated_config: {generated}")
 
-    result = simulate_small_network(run_config, repo_root=PACK_ROOT)
+    if args.compare_ngspice:
+        import numpy as np
+        from repro.ngspice import ngspice_voltages
+
+        run_config = load_small_network_config(run_config, repo_root=PACK_ROOT)
+        try:
+            reference = ngspice_voltages(run_config)
+        except (RuntimeError, ValueError) as exc:
+            raise SystemExit(str(exc)) from exc
+
+    try:
+        result = simulate_small_network(run_config, repo_root=PACK_ROOT, solver=args.solver,
+                                        vol_tol=args.vol_tol, cur_tol=args.cur_tol)
+    except (RuntimeError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"solver: {args.solver}")
     print(f"input_voltage_sets: {result.output_voltages.shape[0]}")
     for index, voltages in enumerate(result.hidden_voltages, start=1):
         print(f"hidden_voltages[{index}]:")
@@ -113,6 +136,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"converged: {result.converged}")
     print(f"sweeps: {result.sweeps}")
     print(f"final_max_voltage_change: {result.final_max_voltage_change:.9g}")
+    if args.cur_tol is not None:
+        print(f"final_max_current_residual: {result.final_max_current_residual:.9g} A")
+    if args.compare_ngspice:
+        layers = (*result.hidden_voltages, result.output_voltages)
+        calculated = np.concatenate(layers, axis=1)
+        difference = calculated - reference
+        row, column = np.unravel_index(np.abs(difference).argmax(), difference.shape)
+        widths = [layer.shape[1] for layer in layers]
+        boundaries = np.cumsum([0, *widths])
+        layer = int(np.searchsorted(boundaries[1:], column, side="right"))
+        print(f"ngspice RMS voltage difference: {np.sqrt(np.mean(difference**2)):.9g} V")
+        print(f"ngspice max absolute voltage difference: {abs(difference[row, column]):.9g} V "
+              f"(input row {row}, layer {layer + 1}, node {column - boundaries[layer]})")
+        print(f"voltage at that node: solver={calculated[row, column]:.12g} V, "
+              f"ngspice={reference[row, column]:.12g} V")
     return 0
 
 

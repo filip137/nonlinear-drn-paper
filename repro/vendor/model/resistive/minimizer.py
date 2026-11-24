@@ -263,7 +263,7 @@ def _shockley_lambertw(log_z, lambertw, *, z_thresh, terms, refine):
     if refine:
         positive = w > 0.0
         for _ in range(3):
-            w = torch.where(positive, w - (w + torch.log(w) - log_z) * (w / (w + 1.0)), w)
+            w = torch.where(positive, w - (w + torch.log(w.clamp_min(torch.finfo(w.dtype).tiny)) - log_z) * (w / (w + 1.0)), w)
     return w
 
 
@@ -273,7 +273,7 @@ def _shockley_root(log_z, w, linear, v_off, vt, log_prefactor):
     Whenever log_z > 0 it is rebuilt as V_off + V_t (log W - log_prefactor), which equals
     it when W e^W = z but does not subtract nearly equal voltages.
     """
-    return torch.where(log_z > 0.0, v_off + vt * (torch.log(w) - log_prefactor), linear - vt * w)
+    return torch.where(log_z > 0.0, v_off + vt * (torch.log(w.clamp_min(torch.finfo(w.dtype).tiny)) - log_prefactor), linear - vt * w)
 
 
 def _exp_guard(dtype):
@@ -300,7 +300,7 @@ def _shockley_lambertw_fused(log_z, *, z_thresh, terms, refine):
     if refine:
         positive = w > 0.0
         for _ in range(3):
-            w = torch.where(positive, w - (w + torch.log(w) - log_z) * (w / (w + 1.0)), w)
+            w = torch.where(positive, w - (w + torch.log(w.clamp_min(torch.finfo(w.dtype).tiny)) - log_z) * (w / (w + 1.0)), w)
     return w
 
 
@@ -949,7 +949,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         the shared kernel, instead of solving every node both ways and discarding half.
         """
         return self._lambert_single_oriented(
-            a, b, self._Is, self._v_off, self._Vt, sign=self._orientation(b.shape[1], b.device),
+            a, b, self._Is, self._v_off, self._Vt, sign=self._orientation(b.shape[1], b.device).reshape((1, b.shape[1]) + (1,) * (b.ndim - 2)),
             z_thresh=self._settings.z_thresh,
             polish=self._settings.use_polish,
             abs_tol=self._settings.single_diode_polish_abs_tol,
@@ -999,7 +999,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
         if nonlinear and self._fused is not None:
             s = self._settings
             v = self._fused(
-                a.expand_as(b).to(torch.float64), b.to(torch.float64), self._orientation(b.shape[1], b.device),
+                a.expand_as(b).to(torch.float64), b.to(torch.float64), self._orientation(b.shape[1], b.device).reshape((1, b.shape[1]) + (1,) * (b.ndim - 2)),
                 Is=float(self._Is), vt=float(self._Vt), v_off=float(self._v_off),
                 b_clip=None if self._b_clip is None else float(self._b_clip), a_min=float(s.single_diode_min_a),
                 z_thresh=float(s.z_thresh), terms=int(s.lambertw_asymptotic_terms), polish=bool(s.use_polish),
@@ -1036,7 +1036,7 @@ class ExponentialSingleDiodeUpdater(QuadraticUpdater):
             return None
         a, a_stride, b, v_old = operands
         s = self._settings
-        sign = self._orientation(b.shape[1], b.device)
+        sign = self._orientation(b.shape[1], b.device).reshape((1, b.shape[1]) + (1,) * (b.ndim - 2))
         v = torch.empty_like(b)
         code = self._compiled.single_diode_update(
             b.shape[0], b.shape[1], a.data_ptr(), a_stride, b.data_ptr(), sign.data_ptr(),
