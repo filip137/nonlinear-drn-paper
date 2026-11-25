@@ -6,24 +6,28 @@ import time
 
 import numpy as np
 
-from model import ANCHOR, CM, DIODE_IS_UA, EDGES, HIDDEN, POL, TARGET, TEACH_US, W0
+import activation
+from model import ANCHOR, CM, DIODE_IS_UA, HIDDEN, LAYOUTS, POL, TARGET, TEACH_US, W0
 
 HERE = Path(__file__).resolve().parent
 PERIOD_US = 62.
 
 
-def network(frozen=None):
+def network(frozen=None, *, kind="diode"):
     parts = [
         ".param lam=0 junction_ratio=1 sink_ratio=1 rmid=1Meg cstore=1p rleak=1e16",
         ".include bridge.inc", "Vdd dd 0 1.8", "Vbp vbp 0 1.30", "Vpr pr 0 .2",
         f"Vpark park 0 {W0}", f"Vbias bias 0 {CM+.13}", ".temp 27",
         f".model activation D(Is={DIODE_IS_UA}u N=1)",
     ]
-    for k, (h, ref, pol) in enumerate(zip(HIDDEN, ANCHOR, POL)):
-        a, b = (h, f"a{k}") if pol>0 else (f"a{k}", h)
-        parts += [f"Vanchor{k} a{k} 0 {ref}", f"Dhid{k} {a} {b} activation", f"Ch{k} {h} 0 .5p"]
+    if kind == "diode":
+        for k, (h, ref, pol) in enumerate(zip(HIDDEN, ANCHOR, POL)):
+            a, b = (h, f"a{k}") if pol>0 else (f"a{k}", h)
+            parts += [f"Vanchor{k} a{k} 0 {ref}", f"Dhid{k} {a} {b} activation", f"Ch{k} {h} 0 .5p"]
+    else:
+        parts.extend(activation.devices(kind))
     parts += ["Cp pos 0 .5p", "Cn neg 0 .5p"]
-    for k, (a, b) in enumerate(EDGES):
+    for k, (a, b) in enumerate(LAYOUTS[kind].edges):
         parts.append(f"Xe{k} {a} {b} w{k} m{k} m{k} dd vbp pr park en enb dump dumpb bridge")
         parts.append(f".ic v(w{k})={W0}" if frozen is None else f"Vw{k} w{k} 0 {frozen[k]:.15g}")
     return parts
@@ -60,10 +64,10 @@ def run(binary, folder, parts, trace, limit=1800):
     return cols, time.monotonic()-begin
 
 
-def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=()):
+def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=(), *, kind="diode"):
     if not len(order):
         raise ValueError("Training requires at least one sample")
-    parts = ["Two moons, on-circuit learning with nominal matched varactor bridges", *network()]
+    parts = [f"Two moons, {kind} activation with nominal varactor bridges", *network(kind=kind)]
     presentations = np.concatenate((order, np.asarray(test, dtype=int)))
     stop = len(order)*PERIOD_US
     for k, name in enumerate(("x", "y", "target")):
@@ -88,7 +92,7 @@ def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=()):
         f"Bteach pos neg I={{{TEACH_US if teaching else 0}u*v(training)*v(teach)*(v(pos,neg)-v(target))}}",
         ".options method=gear reltol=2e-5 abstol=1e-15 vntol=2e-8 chgtol=1e-16 gmin=1e-18 itl4=150",
     ]
-    weights = [f"v(w{k})" for k in range(len(EDGES))]
+    weights = [f"v(w{k})" for k in range(len(LAYOUTS[kind].edges))]
     parts += [".save time v(pos) v(neg) "+" ".join(weights),
               f".tran {maxstep_us}u {len(presentations)*PERIOD_US:g}u 0 {maxstep_us}u"]
     raw, elapsed = run(binary, folder, parts, ["time","v(pos)","v(neg)",*weights])
@@ -108,15 +112,32 @@ def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=()):
     return np.vstack((np.full(len(weights), W0), hist)), readback, test_read, elapsed
 
 
-def read(binary, folder, inputs, weights):
-    parts = ["Teacher-disconnected DC inference on saved bridge capacitor voltages", *network(weights),
-             "Ven en 0 0", "Venb enb 0 1.8", "Vdump dump 0 1.8", "Vdumpb dumpb 0 0", "Vindex idx 0 0"]
+def dc_sweep(inputs, saved):
+    parts = ["Vindex idx 0 0"]
     for k,name in enumerate(("x","y")):
         pts = [f"{j},{v:.12g}" for j,v in enumerate(inputs[:,k])]
         parts += [f"B{name} {name} 0 V=pwl(v(idx),", "+ "+",\n+ ".join(pts)+")"]
-    parts += [".options reltol=1e-7 abstol=1e-15 gmin=1e-18", ".save v(pos) v(neg)",
+    return parts + [".options reltol=1e-7 abstol=1e-15 gmin=1e-18", ".save "+" ".join(saved),
               f".dc Vindex 0 {len(inputs)-1} 1"]
+
+
+def read(binary, folder, inputs, weights, *, kind="diode"):
+    parts = ["Teacher-disconnected DC inference on saved bridge capacitor voltages", *network(weights, kind=kind),
+             "Ven en 0 0", "Venb enb 0 1.8", "Vdump dump 0 1.8", "Vdumpb dumpb 0 0"]
+    parts.extend(dc_sweep(inputs, ["v(pos)", "v(neg)"]))
     raw, _ = run(binary, folder, parts, ["v(pos)","v(neg)"])
     if len(raw["v(pos)"]) != len(inputs):
         raise ValueError("Incomplete DC readback")
     return raw["v(pos)"]-raw["v(neg)"]
+
+
+def read_cells(binary, folder, inputs):
+    parts = ["BJT hidden-cell transfer at fixed collector voltage", "Vdd dd 0 1.8", ".temp 27",
+             *activation.devices("bump")]
+    saved = []
+    for k, h in enumerate(activation.HIDDEN):
+        parts.append(f"Vhold{k} {h} 0 .9")
+        saved.append(f"i(vhold{k})")
+    parts.extend(dc_sweep(inputs, saved))
+    raw, _ = run(binary, folder, parts, saved)
+    return -1e6*np.column_stack([raw[name] for name in saved])

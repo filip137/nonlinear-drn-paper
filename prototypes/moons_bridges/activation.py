@@ -1,0 +1,61 @@
+"""Six localized current-steering cells and an affine ablation with the same ports."""
+import numpy as np
+
+# Equal-width bins across the encoder range. All cells share five voltage references.
+X_CENTERS = .73 + .34 * (np.arange(3) + .5) / 3
+Y_CENTERS = .73 + .34 * (np.arange(2) + .5) / 2
+CENTERS = np.array([(x, y) for x in X_CENTERS for y in Y_CENTERS])
+HIDDEN = tuple(f"h{k}" for k in range(len(CENTERS)))
+EDGES = tuple(("bias", h) for h in HIDDEN) + tuple(
+    (h, output) for output in ("pos", "neg") for h in HIDDEN
+)
+BASE = .74
+OFFSET = .040
+TAIL_UA = 48.
+BETA = 1000.
+THERMAL_V = 8.617333262145e-5 * (273.15 + 27.)
+
+
+def collector_currents(inputs):
+    """Collector currents in µA when all five matched NPNs are forward active."""
+    distance = (np.atleast_2d(inputs)[:, None, :] - CENTERS) / THERMAL_V
+    competition = 2 * np.exp(-OFFSET / THERMAL_V) * np.cosh(distance).sum(axis=2)
+    return TAIL_UA * (BETA / (BETA + 1)) / (1 + competition)
+
+
+def affine_basis(inputs):
+    return np.column_stack((np.ones(len(inputs)), inputs - .9))
+
+
+def affine_coefficients():
+    # Approximate each cell over a uniform voltage grid, independent of moons data.
+    grid = np.linspace(.73, 1.07, 41)
+    points = np.stack(np.meshgrid(grid, grid), axis=-1).reshape(-1, 2)
+    return np.linalg.lstsq(affine_basis(points), collector_currents(points), rcond=None)[0]
+
+
+AFFINE = affine_coefficients()
+
+
+def devices(kind):
+    parts = [f"Ch{k} {h} 0 .5p" for k, h in enumerate(HIDDEN)]
+    if kind == "affine":
+        for k, h in enumerate(HIDDEN):
+            base, gx, gy = AFFINE[:, k]
+            parts.append(f"Bcell{k} {h} 0 I=1u*({base:.15g}+({gx:.15g})*(v(x)-.9)"
+                         f"+({gy:.15g})*(v(y)-.9))")
+        return parts
+    parts += [f"Vbase bcenter 0 {BASE}", f"Vshift bshift 0 {BASE-OFFSET}",
+              f".model cellnpn NPN(Is=1e-15 Bf={BETA} Br=1)"]
+    for axis, centers in (("x", X_CENTERS), ("y", Y_CENTERS)):
+        for i, center in enumerate(centers):
+            parts.append(f"V{axis}c{i} {axis}c{i} 0 {center:.15g}")
+            for sign, gain in (("p", 1), ("m", -1)):
+                parts.append(f"E{axis}{sign}{i} {axis}{sign}{i} bshift {axis} {axis}c{i} {gain}")
+    for k, h in enumerate(HIDDEN):
+        i, j = divmod(k, len(Y_CENTERS))
+        emitter = f"em{k}"
+        parts += [f"Itail{k} {emitter} 0 {TAIL_UA}u", f"Qout{k} {h} bcenter {emitter} cellnpn"]
+        for base in (f"xp{i}", f"xm{i}", f"yp{j}", f"ym{j}"):
+            parts.append(f"Q{k}{base} dd {base} {emitter} cellnpn")
+    return parts
