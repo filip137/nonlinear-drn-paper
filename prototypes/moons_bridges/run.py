@@ -151,10 +151,22 @@ def summarize(out, binary, kind):
         fitted = plane @ np.linalg.lstsq(plane, measured, rcond=None)[0]
         result["grid_residual_from_best_plane_rms_mV"] = 1000*rms(measured-fitted)
         result["grid_output_standard_deviation_mV"] = 1000*float(measured.std())
-        if kind == "bump":
+        if kind == "shunt":
+            hidden = spice.read_nodes(binary, out/"learn"/"dc_hidden", data.inputs[data.train],
+                                      final, model.HIDDEN, kind=kind)
+            conductance = model.SHUNT_G_US * np.exp(
+                model.POL*(hidden-model.CM)/activation.THERMAL_V)
+            result["training_hidden_shunt_conductance_range_uS"] = {
+                h: [float(values.min()), float(values.max())]
+                for h, values in zip(model.HIDDEN, conductance.T)}
+        if kind in ("bump", "diode-bank"):
             probes = np.vstack((activation.CENTERS, points))
-            currents = spice.read_cells(binary, out/"cell_transfer", probes)
-            theory = activation.collector_currents(probes)
+            currents = spice.read_cells(binary, out/"cell_transfer", probes, kind=kind)
+            if kind == "diode-bank":
+                theory, _ = activation.diode_bank_load(np.full_like(currents, .9),
+                                                      activation.steering_sum(probes))
+            else:
+                theory = activation.collector_currents(probes)
             result["cell_peak_current_uA"] = float(currents[0,0])
             result["cell_max_theory_error_nA"] = 1000*float(np.abs(currents-theory).max())
             result["cell_centers_select_own_cell"] = bool(np.array_equal(

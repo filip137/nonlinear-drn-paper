@@ -23,7 +23,12 @@ EDGES = tuple(zip(("x", "x", "y", "y"), HIDDEN)) + tuple(
 )
 POL = np.array([1., -1., 1., -1.])
 ANCHOR = CM + np.array([-.045, .045, -.045, .045])
-KINDS = ("diode", "bump", "affine")
+# At common mode each compact hidden diode carries 2 µA (27 °C).
+SHUNT_IS_UA = activation.PN_IS_UA
+SHUNT_BIAS_UA = 2.
+SHUNT_DROP = activation.THERMAL_V * np.log1p(SHUNT_BIAS_UA / SHUNT_IS_UA)
+SHUNT_G_US = (SHUNT_BIAS_UA + SHUNT_IS_UA) / activation.THERMAL_V
+KINDS = ("diode", "bump", "affine", "shunt", "shunt-linear", "diode-bank")
 
 
 @dataclass(frozen=True)
@@ -44,7 +49,11 @@ def make_layout(hidden, edges):
 
 DIODE_LAYOUT = make_layout(HIDDEN, EDGES)
 CELL_LAYOUT = make_layout(activation.HIDDEN, activation.EDGES)
-LAYOUTS = {"diode": DIODE_LAYOUT, "bump": CELL_LAYOUT, "affine": CELL_LAYOUT}
+SHUNT_LAYOUT = make_layout(HIDDEN, tuple(zip(("x", "x", "y", "y"), HIDDEN)) + tuple(
+    (h, out) for out in ("pos", "neg") for h in HIDDEN
+))
+LAYOUTS = {"diode": DIODE_LAYOUT, "bump": CELL_LAYOUT, "affine": CELL_LAYOUT,
+           "shunt": SHUNT_LAYOUT, "shunt-linear": SHUNT_LAYOUT, "diode-bank": CELL_LAYOUT}
 A, B, INC = DIODE_LAYOUT.a, DIODE_LAYOUT.b, DIODE_LAYOUT.incidence
 
 
@@ -91,20 +100,35 @@ def solve(inputs, w, label=0, teaching=0., *, kind="diode"):
     differential[-2:] = (1., -1.)
     mat = lap[3:, 3:] + teaching*np.outer(differential, differential)
     rhs = -fixed @ lap[:3, 3:] + teaching*label*TARGET*differential
-    if kind != "diode":
+    if kind in ("bump", "affine"):
         currents = (activation.collector_currents(inputs) if kind == "bump"
                     else activation.affine_basis(inputs) @ activation.AFFINE)
         rhs[:, :-2] -= currents
         return np.column_stack((fixed, np.linalg.solve(mat, rhs.T).T))
-    v = np.full((len(inputs), len(FREE)), CM)
+    hidden_idx = np.arange(len(differential)-2)
+    if kind == "shunt-linear":
+        mat[hidden_idx, hidden_idx] += SHUNT_G_US
+        rhs[:, hidden_idx] += CM*SHUNT_G_US - POL*SHUNT_BIAS_UA
+        return np.column_stack((fixed, np.linalg.solve(mat, rhs.T).T))
+    if kind == "shunt":
+        anchor, is_ua, thermal_v = CM-POL*SHUNT_DROP, SHUNT_IS_UA, activation.THERMAL_V
+    else:
+        anchor, is_ua, thermal_v = ANCHOR, DIODE_IS_UA, VT
+    steering = activation.steering_sum(inputs) if kind == "diode-bank" else None
+    v = np.full((len(inputs), len(differential)), CM)
     for _ in range(55):
-        exp = np.exp(POL*(v[:, :4]-ANCHOR)/VT)
+        hidden = v[:, :-2]
+        if steering is None:
+            exp = np.exp(POL*(hidden-anchor)/thermal_v)
+            current, slope = POL*is_ua*(exp-1), is_ua*exp/thermal_v
+        else:
+            current, slope = activation.diode_bank_load(hidden, steering)
         residual = v @ mat.T - rhs
-        residual[:, :4] += POL*DIODE_IS_UA*(exp-1)
+        residual[:, :-2] += current
         if np.max(np.abs(residual)) < 1e-10:
             break
         jac = np.broadcast_to(mat, (len(inputs), *mat.shape)).copy()
-        jac[:, np.arange(4), np.arange(4)] += DIODE_IS_UA*exp/VT
+        jac[:, hidden_idx, hidden_idx] += slope
         dv = np.linalg.solve(jac, residual[..., None])[..., 0]
         v -= dv / np.maximum(1, np.max(np.abs(dv), axis=1, keepdims=True)/.05)
     else:

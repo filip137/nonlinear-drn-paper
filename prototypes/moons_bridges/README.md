@@ -2,6 +2,8 @@
 
 The six-cell nonlinear version scores **112/128** on the same held-out points and **463/512** on a fresh moons sample. It uses 18 trainable varactor bridges and a bank of current-steering transistors. Run it with `python run.py --activation bump`. [Nonlinear circuit, controls and decision boundary](NONLINEAR.md)
 
+A simpler four-neuron version uses one biased PN diode per hidden node and 12 trainable bridges. It scored 105/128 on the live test. A five-diode cell with a resistor achieved 106/128. [Diode circuits and matched control](SHUNT.md)
+
 ## Original diode circuit
 
 In a nominal ngspice transient, 18 bridges learned from 64 labelled moons points and correctly classified 105 of 128 unseen points (82.03%). The test followed training in the same simulation. The weight capacitors stayed connected to their read transistors while the teacher and write switches were disabled. An otherwise identical run with the teacher disabled throughout scored 64/128.

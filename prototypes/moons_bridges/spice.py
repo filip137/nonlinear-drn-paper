@@ -8,6 +8,7 @@ import numpy as np
 
 import activation
 from model import ANCHOR, CM, DIODE_IS_UA, HIDDEN, LAYOUTS, POL, TARGET, TEACH_US, W0
+from model import SHUNT_BIAS_UA, SHUNT_DROP, SHUNT_G_US, SHUNT_IS_UA
 
 HERE = Path(__file__).resolve().parent
 PERIOD_US = 62.
@@ -24,6 +25,17 @@ def network(frozen=None, *, kind="diode"):
         for k, (h, ref, pol) in enumerate(zip(HIDDEN, ANCHOR, POL)):
             a, b = (h, f"a{k}") if pol>0 else (f"a{k}", h)
             parts += [f"Vanchor{k} a{k} 0 {ref}", f"Dhid{k} {a} {b} activation", f"Ch{k} {h} 0 .5p"]
+    elif kind in ("shunt", "shunt-linear"):
+        linear = kind == "shunt-linear"
+        drop = SHUNT_BIAS_UA/SHUNT_G_US if linear else SHUNT_DROP
+        parts += [f"Vlo lo 0 {CM-drop:.15g}", f"Vhi hi 0 {CM+drop:.15g}"]
+        if not linear:
+            parts.append(f".model shunt_diode D(Is={SHUNT_IS_UA}u N=1)")
+        for k, (h, pol) in enumerate(zip(HIDDEN, POL)):
+            a, b = (h, "lo") if pol > 0 else ("hi", h)
+            parts.append(f"Rhid{k} {a} {b} {1e6/SHUNT_G_US:.15g}" if linear
+                         else f"Dhid{k} {a} {b} shunt_diode")
+            parts.append(f"Ch{k} {h} 0 .5p")
     else:
         parts.extend(activation.devices(kind))
     parts += ["Cp pos 0 .5p", "Cn neg 0 .5p"]
@@ -121,19 +133,25 @@ def dc_sweep(inputs, saved):
               f".dc Vindex 0 {len(inputs)-1} 1"]
 
 
-def read(binary, folder, inputs, weights, *, kind="diode"):
+def read_nodes(binary, folder, inputs, weights, nodes, *, kind):
     parts = ["Teacher-disconnected DC inference on saved bridge capacitor voltages", *network(weights, kind=kind),
              "Ven en 0 0", "Venb enb 0 1.8", "Vdump dump 0 1.8", "Vdumpb dumpb 0 0"]
-    parts.extend(dc_sweep(inputs, ["v(pos)", "v(neg)"]))
-    raw, _ = run(binary, folder, parts, ["v(pos)","v(neg)"])
-    if len(raw["v(pos)"]) != len(inputs):
+    saved = [f"v({node})" for node in nodes]
+    parts.extend(dc_sweep(inputs, saved))
+    raw, _ = run(binary, folder, parts, saved)
+    if len(raw[saved[0]]) != len(inputs):
         raise ValueError("Incomplete DC readback")
-    return raw["v(pos)"]-raw["v(neg)"]
+    return np.column_stack([raw[name] for name in saved])
 
 
-def read_cells(binary, folder, inputs):
-    parts = ["BJT hidden-cell transfer at fixed collector voltage", "Vdd dd 0 1.8", ".temp 27",
-             *activation.devices("bump")]
+def read(binary, folder, inputs, weights, *, kind="diode"):
+    output = read_nodes(binary, folder, inputs, weights, ("pos", "neg"), kind=kind)
+    return output[:, 0]-output[:, 1]
+
+
+def read_cells(binary, folder, inputs, *, kind="bump"):
+    parts = ["Hidden-cell current at fixed port voltage", "Vdd dd 0 1.8", ".temp 27",
+             *activation.devices(kind)]
     saved = []
     for k, h in enumerate(activation.HIDDEN):
         parts.append(f"Vhold{k} {h} 0 .9")
