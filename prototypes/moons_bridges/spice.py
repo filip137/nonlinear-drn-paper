@@ -14,9 +14,9 @@ HERE = Path(__file__).resolve().parent
 PERIOD_US = 62.
 
 
-def network(frozen=None, *, kind="diode"):
+def network(frozen=None, *, kind="diode", store_pf=1.):
     parts = [
-        ".param lam=0 junction_ratio=1 sink_ratio=1 rmid=1Meg cstore=1p rleak=1e16",
+        f".param lam=0 junction_ratio=1 sink_ratio=1 rmid=1Meg cstore={store_pf:g}p rleak=1e16",
         ".include bridge.inc", "Vdd dd 0 1.8", "Vbp vbp 0 1.30", "Vpr pr 0 .2",
         f"Vpark park 0 {W0}", f"Vbias bias 0 {CM+.13}", ".temp 27",
         f".model activation D(Is={DIODE_IS_UA}u N=1)",
@@ -76,10 +76,11 @@ def run(binary, folder, parts, trace, limit=1800):
     return cols, time.monotonic()-begin
 
 
-def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=(), *, kind="diode"):
+def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=(), *,
+          kind="diode", margin=None, store_pf=1.):
     if not len(order):
         raise ValueError("Training requires at least one sample")
-    parts = [f"Two moons, {kind} activation with nominal varactor bridges", *network(kind=kind)]
+    parts = [f"Two moons, {kind} activation with nominal varactor bridges", *network(kind=kind, store_pf=store_pf)]
     presentations = np.concatenate((order, np.asarray(test, dtype=int)))
     stop = len(order)*PERIOD_US
     for k, name in enumerate(("x", "y", "target")):
@@ -92,22 +93,31 @@ def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=(), *,
             lines.append(f"+ {t+1:g}u {old:.12g} {t+5:g}u {value:.12g}")
             old = value
         parts += [*lines, "+ )"]
+    permit = "v(training)"
+    if margin is not None:
+        # Sample the unperturbed output before the writer is armed. Hold the decision through the nudge.
+        parts += ["Bfree free_diff 0 V=v(pos,neg)",
+                  "Vsample sample 0 PULSE(0 1 8u .02u .02u 3.96u 62u)",
+                  ".model track SW(Ron=10 Roff=1e16 Vt=.5 Vh=.05)",
+                  "Ssample free_diff held sample 0 track", "Chold held 0 1p", "Rhold held 0 1e16",
+                  f"Brequest request 0 V=u({margin:.14g}-v(held)*v(target)/{TARGET})"]
+        permit += "*v(request)"
     parts += [
         f"Vtraining training 0 PWL(0 1 {stop-.5:g}u 1 {stop:g}u 0)",
         "Venclk enclk 0 PULSE(0 1.8 14u .02u .02u 24.98u 62u)",
-        "Ben en 0 V=v(enclk)*v(training)",
+        f"Ben en 0 V=v(enclk)*{permit}",
         # Disconnect park before en rises; restore it after en falls.
         "Vdumpclk dumpclk 0 PULSE(1.8 0 13.95u .02u .02u 25.10u 62u)",
-        "Bdump dump 0 V=1.8+(v(dumpclk)-1.8)*v(training)",
+        f"Bdump dump 0 V=1.8+(v(dumpclk)-1.8)*{permit}",
         "Eenb enb dd en 0 -1", "Edumpb dumpb dd dump 0 -1",
         "Vteach teach 0 PULSE(0 1 17u 4u 4u 21u 62u)",
-        f"Bteach pos neg I={{{TEACH_US if teaching else 0}u*v(training)*v(teach)*(v(pos,neg)-v(target))}}",
+        f"Bteach pos neg I={{{TEACH_US if teaching else 0}u*{permit}*v(teach)*(v(pos,neg)-v(target))}}",
         ".options method=gear reltol=2e-5 abstol=1e-15 vntol=2e-8 chgtol=1e-16 gmin=1e-18 itl4=150",
     ]
     weights = [f"v(w{k})" for k in range(len(LAYOUTS[kind].edges))]
-    parts += [".save time v(pos) v(neg) "+" ".join(weights),
+    parts += [".save time v(pos) v(neg) v(en) "+" ".join(weights),
               f".tran {maxstep_us}u {len(presentations)*PERIOD_US:g}u 0 {maxstep_us}u"]
-    raw, elapsed = run(binary, folder, parts, ["time","v(pos)","v(neg)",*weights])
+    raw, elapsed = run(binary, folder, parts, ["time","v(pos)","v(neg)","v(en)",*weights])
     ts = raw["time"]*1e6
     if abs(ts[-1]-len(presentations)*PERIOD_US)>1e-5:
         raise ValueError("Incomplete training transient")
@@ -119,6 +129,8 @@ def train(binary, folder, data, order, teaching=True, maxstep_us=.5, test=(), *,
     test_ends = stop + np.arange(len(test))*PERIOD_US + 60
     test_read = dict(test_output=np.interp(test_ends, ts, output),
                      test_weights=np.array([np.interp(test_ends, ts, raw[k]) for k in weights]).T)
+    test_read["write_enabled"] = np.interp(ends-45, ts, raw["v(en)"]) > .9
+    test_read["test_write_enabled"] = np.interp(test_ends-45, ts, raw["v(en)"]) > .9
     # Netlists, numeric readbacks and logs suffice to reproduce the large binary trace.
     (folder/"trace.raw").unlink()
     return np.vstack((np.full(len(weights), W0), hist)), readback, test_read, elapsed
@@ -133,8 +145,8 @@ def dc_sweep(inputs, saved):
               f".dc Vindex 0 {len(inputs)-1} 1"]
 
 
-def read_nodes(binary, folder, inputs, weights, nodes, *, kind):
-    parts = ["Teacher-disconnected DC inference on saved bridge capacitor voltages", *network(weights, kind=kind),
+def read_nodes(binary, folder, inputs, weights, nodes, *, kind, store_pf=1.):
+    parts = ["Teacher-disconnected DC inference on saved bridge capacitor voltages", *network(weights, kind=kind, store_pf=store_pf),
              "Ven en 0 0", "Venb enb 0 1.8", "Vdump dump 0 1.8", "Vdumpb dumpb 0 0"]
     saved = [f"v({node})" for node in nodes]
     parts.extend(dc_sweep(inputs, saved))
@@ -144,8 +156,8 @@ def read_nodes(binary, folder, inputs, weights, nodes, *, kind):
     return np.column_stack([raw[name] for name in saved])
 
 
-def read(binary, folder, inputs, weights, *, kind="diode"):
-    output = read_nodes(binary, folder, inputs, weights, ("pos", "neg"), kind=kind)
+def read(binary, folder, inputs, weights, *, kind="diode", store_pf=1.):
+    output = read_nodes(binary, folder, inputs, weights, ("pos", "neg"), kind=kind, store_pf=store_pf)
     return output[:, 0]-output[:, 1]
 
 
@@ -153,7 +165,8 @@ def read_cells(binary, folder, inputs, *, kind="bump"):
     parts = ["Hidden-cell current at fixed port voltage", "Vdd dd 0 1.8", ".temp 27",
              *activation.devices(kind)]
     saved = []
-    for k, h in enumerate(activation.HIDDEN):
+    hidden = activation.GRID_HIDDEN if kind == "dense-bank" else activation.HIDDEN
+    for k, h in enumerate(hidden):
         parts.append(f"Vhold{k} {h} 0 .9")
         saved.append(f"i(vhold{k})")
     parts.extend(dc_sweep(inputs, saved))

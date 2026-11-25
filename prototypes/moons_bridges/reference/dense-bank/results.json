@@ -1,0 +1,385 @@
+{
+  "kind": "dense-bank",
+  "epochs": 8,
+  "seed_test": 20707,
+  "training_examples": 64,
+  "store_pF": 0.33,
+  "threshold_uV": 30.0,
+  "validation_seed": 913,
+  "cases": {
+    "learn": {
+      "train": {
+        "correct": 63,
+        "count": 64,
+        "accuracy": 0.984375,
+        "mean_signed_margin_uV": 47.30499035974535,
+        "median_abs_margin_uV": 45.15776137786753,
+        "confusion_actual_by_predicted": [
+          [
+            31,
+            1
+          ],
+          [
+            0,
+            32
+          ]
+        ]
+      },
+      "validation": {
+        "correct": 380,
+        "count": 384,
+        "accuracy": 0.9895833333333334,
+        "mean_signed_margin_uV": 46.138648843851875,
+        "median_abs_margin_uV": 45.01318772992535,
+        "confusion_actual_by_predicted": [
+          [
+            191,
+            1
+          ],
+          [
+            3,
+            189
+          ]
+        ]
+      },
+      "original_test": {
+        "correct": 127,
+        "count": 128,
+        "accuracy": 0.9921875,
+        "mean_signed_margin_uV": 46.45085313056615,
+        "median_abs_margin_uV": 43.55653667342807,
+        "confusion_actual_by_predicted": [
+          [
+            64,
+            0
+          ],
+          [
+            1,
+            63
+          ]
+        ]
+      },
+      "test": {
+        "correct": 1016,
+        "count": 1024,
+        "accuracy": 0.9921875,
+        "mean_signed_margin_uV": 45.78151689374954,
+        "median_abs_margin_uV": 44.200700041185925,
+        "confusion_actual_by_predicted": [
+          [
+            508,
+            4
+          ],
+          [
+            4,
+            508
+          ]
+        ]
+      },
+      "writes_by_epoch": [
+        20,
+        7,
+        2,
+        7,
+        4,
+        3,
+        5,
+        3
+      ],
+      "live_test": {
+        "correct": 127,
+        "count": 128,
+        "accuracy": 0.9921875,
+        "mean_signed_margin_uV": 46.880795616957315,
+        "median_abs_margin_uV": 46.28002898446337,
+        "confusion_actual_by_predicted": [
+          [
+            70,
+            0
+          ],
+          [
+            1,
+            57
+          ]
+        ]
+      },
+      "live_vs_dc_decisions_agree": 128,
+      "live_vs_dc_rms_uV": 0.009704953531178593,
+      "python_test": {
+        "correct": 1016,
+        "count": 1024,
+        "accuracy": 0.9921875,
+        "mean_signed_margin_uV": 50.67755972597678,
+        "median_abs_margin_uV": 48.20776445985109,
+        "confusion_actual_by_predicted": [
+          [
+            508,
+            4
+          ],
+          [
+            4,
+            508
+          ]
+        ]
+      },
+      "same_weight_dc_vs_python_rms_uV": 7.457277372371775e-06,
+      "test_accuracy_by_read_offset_uV": {
+        "-30": 0.9716796875,
+        "-10": 0.9921875,
+        "0": 0.9921875,
+        "10": 0.990234375,
+        "30": 0.9677734375
+      },
+      "previous_512": {
+        "correct": 506,
+        "count": 512,
+        "accuracy": 0.98828125,
+        "mean_signed_margin_uV": 45.803667780718165,
+        "median_abs_margin_uV": 44.19860433285683,
+        "confusion_actual_by_predicted": [
+          [
+            252,
+            4
+          ],
+          [
+            2,
+            254
+          ]
+        ]
+      },
+      "gate_mismatches_vs_free_read": 0,
+      "fine_gate_differences": 0,
+      "fine_prefix_max_weight_difference_uV": 33.757835776304645,
+      "weight_range_V": [
+        1.54363563586649,
+        1.5519043257604093
+      ],
+      "validation_by_epoch": [
+        0.5,
+        0.9583333333333334,
+        0.9635416666666666,
+        0.9817708333333334,
+        0.9817708333333334,
+        0.9869791666666666,
+        0.9869791666666666,
+        0.9869791666666666,
+        0.9895833333333334
+      ]
+    },
+    "ungated": {
+      "train": {
+        "correct": 62,
+        "count": 64,
+        "accuracy": 0.96875,
+        "mean_signed_margin_uV": 248.85765712588832,
+        "median_abs_margin_uV": 292.73679951574707,
+        "confusion_actual_by_predicted": [
+          [
+            31,
+            1
+          ],
+          [
+            1,
+            31
+          ]
+        ]
+      },
+      "validation": {
+        "correct": 356,
+        "count": 384,
+        "accuracy": 0.9270833333333334,
+        "mean_signed_margin_uV": 231.36328398394926,
+        "median_abs_margin_uV": 255.46487214528346,
+        "confusion_actual_by_predicted": [
+          [
+            177,
+            15
+          ],
+          [
+            13,
+            179
+          ]
+        ]
+      },
+      "original_test": {
+        "correct": 117,
+        "count": 128,
+        "accuracy": 0.9140625,
+        "mean_signed_margin_uV": 215.65266214371593,
+        "median_abs_margin_uV": 243.04951795939277,
+        "confusion_actual_by_predicted": [
+          [
+            57,
+            7
+          ],
+          [
+            4,
+            60
+          ]
+        ]
+      },
+      "test": {
+        "correct": 953,
+        "count": 1024,
+        "accuracy": 0.9306640625,
+        "mean_signed_margin_uV": 230.1506183787029,
+        "median_abs_margin_uV": 263.0596467021462,
+        "confusion_actual_by_predicted": [
+          [
+            475,
+            37
+          ],
+          [
+            34,
+            478
+          ]
+        ]
+      },
+      "writes_by_epoch": [
+        64,
+        64,
+        64,
+        64,
+        64,
+        64,
+        64,
+        64
+      ]
+    },
+    "null": {
+      "train": {
+        "correct": 32,
+        "count": 64,
+        "accuracy": 0.5,
+        "mean_signed_margin_uV": -2.6680047060523293e-09,
+        "median_abs_margin_uV": 6.938893903907228e-08,
+        "confusion_actual_by_predicted": [
+          [
+            32,
+            0
+          ],
+          [
+            32,
+            0
+          ]
+        ]
+      },
+      "validation": {
+        "correct": 192,
+        "count": 384,
+        "accuracy": 0.5,
+        "mean_signed_margin_uV": -1.0592799785473043e-08,
+        "median_abs_margin_uV": 6.822320486321587e-08,
+        "confusion_actual_by_predicted": [
+          [
+            192,
+            0
+          ],
+          [
+            192,
+            0
+          ]
+        ]
+      },
+      "original_test": {
+        "correct": 64,
+        "count": 128,
+        "accuracy": 0.5,
+        "mean_signed_margin_uV": -1.3736407844522347e-08,
+        "median_abs_margin_uV": 6.34492458573277e-08,
+        "confusion_actual_by_predicted": [
+          [
+            64,
+            0
+          ],
+          [
+            64,
+            0
+          ]
+        ]
+      },
+      "test": {
+        "correct": 512,
+        "count": 1024,
+        "accuracy": 0.5,
+        "mean_signed_margin_uV": -1.2091781569079085e-08,
+        "median_abs_margin_uV": 6.772360450213455e-08,
+        "confusion_actual_by_predicted": [
+          [
+            512,
+            0
+          ],
+          [
+            512,
+            0
+          ]
+        ]
+      },
+      "writes_by_epoch": [
+        64,
+        64,
+        64,
+        64,
+        64,
+        64,
+        64,
+        64
+      ]
+    }
+  },
+  "linear_logistic_test_accuracy": 0.8837890625,
+  "previous_six_cell_spice_test": {
+    "correct": 902,
+    "count": 1024,
+    "accuracy": 0.880859375,
+    "mean_signed_margin_uV": 201.1433496500344,
+    "median_abs_margin_uV": 270.45088545296636,
+    "confusion_actual_by_predicted": [
+      [
+        451,
+        61
+      ],
+      [
+        61,
+        451
+      ]
+    ]
+  },
+  "independent_training_repeat": {
+    "dataset_seed": 100,
+    "spice_test": {
+      "correct": 1016,
+      "count": 1024,
+      "accuracy": 0.9921875,
+      "mean_signed_margin_uV": 49.42588361321469,
+      "median_abs_margin_uV": 51.47025520169102,
+      "confusion_actual_by_predicted": [
+        [
+          508,
+          4
+        ],
+        [
+          4,
+          508
+        ]
+      ]
+    },
+    "python_test": {
+      "correct": 1012,
+      "count": 1024,
+      "accuracy": 0.98828125,
+      "mean_signed_margin_uV": 49.321219938183184,
+      "median_abs_margin_uV": 46.69223115338905,
+      "confusion_actual_by_predicted": [
+        [
+          508,
+          4
+        ],
+        [
+          8,
+          504
+        ]
+      ]
+    }
+  }
+}

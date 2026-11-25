@@ -198,11 +198,19 @@ def summarize(out, binary, kind):
 
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("--case",choices=["learn","null","fine","report","all"],default="all")
+    cli.add_argument("--case",choices=["learn","null","fine","report","all","ungated","validation","repeat"],default="all")
     cli.add_argument("--activation", choices=model.KINDS, default="diode")
     cli.add_argument("--out",type=Path)
     cli.add_argument("--ngspice",default=shutil.which("ngspice"))
     args = cli.parse_args()
+    if args.activation == "dense-bank":
+        import accuracy
+        if not args.ngspice and args.case != "validation":
+            cli.error("Supply an ngspice executable using --ngspice or PATH")
+        accuracy.execute(args.case, args.out or accuracy.OUT, args.ngspice)
+        return
+    if args.case in ("ungated","validation","repeat"):
+        cli.error("This case is available with --activation dense-bank")
     out = args.out or (DEFAULT_OUT if args.activation == "diode" else
                        DEFAULT_OUT.with_name(f"moons_bridges_{args.activation}"))
     if not args.ngspice:

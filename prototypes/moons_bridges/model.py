@@ -28,7 +28,10 @@ SHUNT_IS_UA = activation.PN_IS_UA
 SHUNT_BIAS_UA = 2.
 SHUNT_DROP = activation.THERMAL_V * np.log1p(SHUNT_BIAS_UA / SHUNT_IS_UA)
 SHUNT_G_US = (SHUNT_BIAS_UA + SHUNT_IS_UA) / activation.THERMAL_V
-KINDS = ("diode", "bump", "affine", "shunt", "shunt-linear", "diode-bank")
+DENSE_MARGIN = 30e-6
+DENSE_STORE_PF = .33
+DENSE_EPOCHS = 8
+KINDS = ("diode", "bump", "affine", "shunt", "shunt-linear", "diode-bank", "dense-bank")
 
 
 @dataclass(frozen=True)
@@ -53,7 +56,8 @@ SHUNT_LAYOUT = make_layout(HIDDEN, tuple(zip(("x", "x", "y", "y"), HIDDEN)) + tu
     (h, out) for out in ("pos", "neg") for h in HIDDEN
 ))
 LAYOUTS = {"diode": DIODE_LAYOUT, "bump": CELL_LAYOUT, "affine": CELL_LAYOUT,
-           "shunt": SHUNT_LAYOUT, "shunt-linear": SHUNT_LAYOUT, "diode-bank": CELL_LAYOUT}
+           "shunt": SHUNT_LAYOUT, "shunt-linear": SHUNT_LAYOUT, "diode-bank": CELL_LAYOUT,
+           "dense-bank": make_layout(activation.GRID_HIDDEN, activation.GRID_EDGES)}
 A, B, INC = DIODE_LAYOUT.a, DIODE_LAYOUT.b, DIODE_LAYOUT.incidence
 
 
@@ -70,8 +74,8 @@ def encode(xy, lo, hi):
     return CM + .17 * np.clip(2*(xy-lo)/(hi-lo)-1, -1, 1)
 
 
-def cohort():
-    xy, labels = make_moons(n_samples=192, noise=.10, random_state=12)
+def cohort(dataset_seed=12):
+    xy, labels = make_moons(n_samples=192, noise=.10, random_state=dataset_seed)
     train, test = train_test_split(np.arange(len(xy)), train_size=64, stratify=labels,
                                    random_state=31)
     lo, hi = xy[train].min(axis=0), xy[train].max(axis=0)
@@ -114,7 +118,13 @@ def solve(inputs, w, label=0, teaching=0., *, kind="diode"):
         anchor, is_ua, thermal_v = CM-POL*SHUNT_DROP, SHUNT_IS_UA, activation.THERMAL_V
     else:
         anchor, is_ua, thermal_v = ANCHOR, DIODE_IS_UA, VT
-    steering = activation.steering_sum(inputs) if kind == "diode-bank" else None
+    steering = None
+    if kind == "diode-bank":
+        steering = activation.steering_sum(inputs)
+    elif kind == "dense-bank":
+        steering = activation.steering_sum(inputs, centers=activation.GRID_CENTERS,
+                                            gain=activation.GRID_GAIN, reference=activation.GRID_REF)
+    tail_ohms = activation.GRID_TAIL_OHMS if kind == "dense-bank" else activation.TAIL_OHMS
     v = np.full((len(inputs), len(differential)), CM)
     for _ in range(55):
         hidden = v[:, :-2]
@@ -122,7 +132,7 @@ def solve(inputs, w, label=0, teaching=0., *, kind="diode"):
             exp = np.exp(POL*(hidden-anchor)/thermal_v)
             current, slope = POL*is_ua*(exp-1), is_ua*exp/thermal_v
         else:
-            current, slope = activation.diode_bank_load(hidden, steering)
+            current, slope = activation.diode_bank_load(hidden, steering, tail_ohms)
         residual = v @ mat.T - rhs
         residual[:, :-2] += current
         if np.max(np.abs(residual)) < 1e-10:
@@ -145,12 +155,17 @@ def bridge_charge(nodes, *, kind="diode"):
     return q(a) + q(b) - 2*q((a+b)/2)
 
 
-def python_train(data, order, enabled=True, *, kind="diode"):
+def python_train(data, order, enabled=True, *, kind="diode", margin=None, store_pf=CSTORE_PF):
     w = np.full(len(LAYOUTS[kind].edges), W0)
     history = [w.copy()]
     for i in order:
+        if margin is not None:
+            sampled = solve(data.inputs[i], w, kind=kind)[0]
+            if data.labels[i]*(sampled[-2]-sampled[-1]) >= margin:
+                history.append(w.copy())
+                continue
         # The 2 fF write bus was parked at W0. Charge shares at write enable.
-        armed = (CSTORE_PF*w + .002*W0)/(CSTORE_PF+.002)
+        armed = (store_pf*w + .002*W0)/(store_pf+.002)
         free = solve(data.inputs[i], armed, kind=kind)[0]
         start = bridge_charge(free, kind=kind)
         beta = TEACH_US if enabled else 0.
@@ -158,7 +173,7 @@ def python_train(data, order, enabled=True, *, kind="diode"):
         # Endpoint charge and conductance settle self-consistently with a live store.
         for _ in range(12):
             nudged = solve(data.inputs[i], new, data.labels[i], beta, kind=kind)[0]
-            next_w = armed + (bridge_charge(nudged, kind=kind)-start)/(CSTORE_PF+.002)
+            next_w = armed + (bridge_charge(nudged, kind=kind)-start)/(store_pf+.002)
             if np.max(np.abs(next_w-new)) < 1e-12:
                 break
             new = next_w
@@ -184,13 +199,17 @@ if __name__ == "__main__":
     import argparse
 
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("--epochs", type=int, default=3)
+    cli.add_argument("--epochs", type=int)
     cli.add_argument("--activation", choices=KINDS, default="diode")
     args = cli.parse_args()
-    if args.epochs < 1:
+    dense = args.activation == "dense-bank"
+    epochs = args.epochs if args.epochs is not None else (DENSE_EPOCHS if dense else 3)
+    if epochs < 1:
         cli.error("--epochs must be positive")
     data = cohort()
-    trajectory = python_train(data, schedule(data.train, args.epochs), kind=args.activation)
+    trajectory = python_train(data, schedule(data.train, epochs), kind=args.activation,
+                              margin=DENSE_MARGIN if dense else None,
+                              store_pf=DENSE_STORE_PF if dense else CSTORE_PF)
     for epoch, weights in enumerate(trajectory[::len(data.train)]):
         nodes = solve(data.inputs, weights, kind=args.activation)
         outputs = nodes[:, -2]-nodes[:, -1]

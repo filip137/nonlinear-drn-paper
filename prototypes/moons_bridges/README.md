@@ -1,5 +1,7 @@
 # A two-moons classifier built from varactor bridges
 
+The 12-cell diode network correctly classified **1,016 of 1,024 independent moons points (99.22%)** in ngspice. It trained on the original 64 examples. A shared margin comparator enabled 51 of 512 potential writes. In the uninterrupted training transient it classified 127 of 128 subsequent points using the stored charge. Run `python run.py --activation dense-bank`. [Circuit, controls and test protocol](ACCURACY.md)
+
 The six-cell nonlinear version scores **112/128** on the same held-out points and **463/512** on a fresh moons sample. It uses 18 trainable varactor bridges and a bank of current-steering transistors. Run it with `python run.py --activation bump`. [Nonlinear circuit, controls and decision boundary](NONLINEAR.md)
 
 A simpler four-neuron version uses one biased PN diode per hidden node and 12 trainable bridges. It scored 105/128 on the live test. A five-diode cell with a resistor achieved 106/128. [Diode circuits and matched control](SHUNT.md)
